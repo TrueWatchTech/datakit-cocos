@@ -1,0 +1,15 @@
+{
+  "name": "cocos-hybrid-creator2-sample",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "sdk:build": "npm --prefix ../.. run build",
+    "sdk:install": "node node_modules/@truewatchtech/cocos-sdk/bin/cli.cjs install --project . --creator 2",
+    "setup": "npm run sdk:build && npm install && npm run sdk:install",
+    "configure": "node ../../scripts/configure-sample.mjs --output-root . --native-host-dir native-host",
+    "native:install": "node ../../scripts/install-hybrid-host.mjs --project . --creator 2"
+  },
+  "dependencies": {
+    "@truewatchtech/cocos-sdk": "file:../../packages/cocos"
+  }
+}

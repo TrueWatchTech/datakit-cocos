@@ -1,0 +1,60 @@
+{
+  "excludeScenes": [],
+  "orientation": {
+    "landscapeLeft": true,
+    "landscapeRight": true,
+    "portrait": false,
+    "upsideDown": false
+  },
+  "packageName": "com.truewatch.sample.cocos.hybrid.creator2",
+  "startScene": "2d2f792f-a40c-49bb-a189-ed176a246e49",
+  "title": "Cocos Hybrid Creator 2",
+  "webOrientation": "auto",
+  "android": {
+    "packageName": "com.truewatch.sample.cocos.hybrid.creator2",
+    "REMOTE_SERVER_ROOT": ""
+  },
+  "inlineSpriteFrames": true,
+  "inlineSpriteFrames_native": true,
+  "mainCompressionType": "default",
+  "mainIsRemote": false,
+  "optimizeHotUpdate": false,
+  "md5Cache": true,
+  "nativeMd5Cache": true,
+  "encryptJs": false,
+  "xxteaKey": "cocos-sdk-sample",
+  "zipCompressJs": true,
+  "fb-instant-games": {},
+  "ios": {
+    "packageName": "com.truewatch.sample.cocos.hybrid.creator2",
+    "REMOTE_SERVER_ROOT": "",
+    "ios_enable_jit": true
+  },
+  "mac": {
+    "packageName": "com.truewatch.sample.cocos.hybrid.creator2",
+    "REMOTE_SERVER_ROOT": "",
+    "width": 1280,
+    "height": 720
+  },
+  "win32": {
+    "REMOTE_SERVER_ROOT": "",
+    "width": 1280,
+    "height": 720
+  },
+  "android-instant": {
+    "packageName": "com.truewatch.sample.cocos.hybrid.creator2",
+    "REMOTE_SERVER_ROOT": "",
+    "pathPattern": "",
+    "scheme": "https",
+    "host": "",
+    "skipRecord": false,
+    "recordPath": ""
+  },
+  "harmonyos-next": {
+    "packageName": "com.truewatch.sample.cocos.hybrid.creator2",
+    "REMOTE_SERVER_ROOT": "",
+    "jsEngine": "JSVM"
+  },
+  "appBundle": false,
+  "agreements": {}
+}

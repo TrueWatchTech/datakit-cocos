@@ -1,0 +1,39 @@
+/node_modules/
+/packages/*/dist/
+/packages/*/native/
+/packages/*/extension/
+/artifacts/
+/coverage/
+/.idea/
+*.iml
+
+# Machine-local environment files. Commit only sanitized *.example templates.
+.env
+.env.*
+!.env.example
+
+# Generated from SAMPLE_* environment variables; may contain credentials.
+*.generated.ts*
+
+# Local diagnostic projects and experiments; maintained samples live in hybrid-creator{2,3}.
+/examples/creator2/
+/examples/creator3/
+/examples/creator2-app/
+/examples/shared/
+/examples/native-host/
+/examples/hybrid-creator3/assets/ReplayTrafficBenchmark.ts*
+/examples/hybrid-creator3/native-host/android/PerfectHybridReplayUploader.java
+/scripts/*replay-traffic*
+/test/diagnostic-sample.test.ts
+/test/replay-traffic-benchmark.test.ts
+
+# Staged into the publishable workspace by npm run build.
+/packages/cocos/LICENSE
+/packages/cocos/THIRD_PARTY_NOTICES
+
+# Local agent guidance and implementation notes (do not commit).
+/AGENTS.md
+/docs/
+
+*.tgz
+.DS_Store

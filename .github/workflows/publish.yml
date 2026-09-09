@@ -1,0 +1,58 @@
+name: Publish TrueWatch npm package
+
+on:
+  push:
+    tags: ['agent_*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: truewatch-npm-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'TrueWatchTech/datakit-cocos'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run verify
+        env:
+          RELEASE_GIT_TAG: ${{ github.ref_name }}
+      - run: node scripts/pack.mjs
+
+  publish:
+    needs: verify
+    if: github.repository == 'TrueWatchTech/datakit-cocos'
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run build
+      - name: Validate release and select npm dist-tag
+        id: release
+        run: node scripts/publish-preflight.mjs
+        env:
+          RELEASE_GIT_TAG: ${{ github.ref_name }}
+      - name: Publish to npm
+        if: steps.release.outputs.already_published != 'true'
+        run: >-
+          npm publish
+          --workspace @truewatchtech/cocos-sdk
+          --tag "${{ steps.release.outputs.npm_dist_tag }}"
+          --access public

@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES5",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": ["ES2015", "DOM"],
+    "rootDir": "src",
+    "outDir": "packages/cocos/dist/creator2",
+    "sourceMap": true
+  },
+  "include": ["src/core/**/*.ts", "src/creator2/**/*.ts"]
+}

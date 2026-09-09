@@ -1,0 +1,414 @@
+import { truewatchSdk, setReplayCamera } from '@truewatchtech/cocos-sdk/creator2';
+
+const { ccclass } = cc._decorator;
+
+const VIEW_NAME = 'CocosHybridCreator2Sample';
+const AUTO_TEST_URL = 'https://httpbin.org/get?sample=cocos-hybrid-creator2&collection=automatic';
+const TRACE_TEST_URL = 'https://httpbin.org/get?sample=cocos-hybrid-creator2&collection=manual';
+const ATTRIBUTES = {
+  sample_name: 'cocos-hybrid-creator2',
+  creator_generation: '2',
+  integration_mode: 'hybrid',
+};
+
+const COLORS = {
+  background: cc.color(12, 18, 34, 255),
+  panel: cc.color(27, 39, 64, 255),
+  primary: cc.color(44, 202, 178, 255),
+  info: cc.color(73, 142, 245, 255),
+  warning: cc.color(245, 166, 35, 255),
+  danger: cc.color(236, 83, 103, 255),
+  text: cc.color(239, 244, 255, 255),
+  muted: cc.color(151, 164, 190, 255),
+};
+
+let activeSample: HybridTelemetryRuntime | undefined;
+
+/** Startup component for the Creator 2 Hybrid integration sample. */
+@ccclass
+export default class HybridTelemetrySample extends cc.Component {
+  start(): void {
+    if (activeSample) return;
+    activeSample = new HybridTelemetryRuntime();
+    activeSample.start();
+  }
+}
+
+/** Call this only when the native host removes or leaves the Cocos container. */
+export function leaveHybridCocos(): void {
+  if (activeSample) activeSample.leaveCocosPage();
+  else truewatchSdk.leaveCocos();
+}
+
+interface UntrackedXhrMethods {
+  open: (this: XMLHttpRequest, method: string, url: string, async?: boolean) => void;
+  send: (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) => void;
+  setRequestHeader: (this: XMLHttpRequest, name: string, value: string) => void;
+}
+
+class HybridTelemetryRuntime {
+  private status?: cc.Label;
+  private replayCard?: cc.Graphics;
+  private privacyMaskProbe?: cc.Node;
+  private replayState = 0;
+  private replayCamera?: cc.Camera;
+  private resourceSequence = 0;
+  private entered = false;
+  private entering = false;
+  private waitingForNativeReturn = false;
+  private untrackedXhr?: UntrackedXhrMethods;
+
+  start(): void {
+    const scene = this.createScene();
+    this.replayCamera = scene.camera;
+    setReplayCamera(scene.camera);
+    this.render(scene.root);
+
+    if (!cc.sys.isNative) {
+      this.setStatus('Editor preview only. Build Android or iOS to call the native bridge.', COLORS.warning);
+      return;
+    }
+
+    try {
+      this.untrackedXhr = {
+        open: XMLHttpRequest.prototype.open as UntrackedXhrMethods['open'],
+        send: XMLHttpRequest.prototype.send,
+        setRequestHeader: XMLHttpRequest.prototype.setRequestHeader,
+      };
+      truewatchSdk.attach({
+        replay: {
+          captureFps: 2,
+          maxImageDimension: 720,
+          touchPrivacy: 'show',
+        },
+        autoTrack: {
+          scenes: false,
+          actions: true,
+          errors: true,
+          console: true,
+          network: true,
+        },
+      });
+      if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask');
+      if (this.isNativePageVisible()) {
+        this.setStatus('Hybrid attached · waiting for the native page to open Cocos', COLORS.info);
+        this.waitForNativeReturn();
+      } else {
+        this.enterCocosPage();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.setStatus(`Native initialization missing: ${message}`, COLORS.danger);
+      console.error('[HybridTelemetrySample] Unable to enter Hybrid mode', error);
+    }
+  }
+
+  private enterCocosPage(): void {
+    if (this.entered || this.entering) return;
+    this.entering = true;
+    // Let Creator 2 present one main-framebuffer frame before Replay redirects
+    // the camera to a RenderTexture. This avoids an emulator restart race that
+    // can leave the screen black on a later Cocos process launch.
+    cc.director.once(cc.Director.EVENT_AFTER_DRAW, () => {
+      this.entering = false;
+      if (this.entered) return;
+      truewatchSdk.enterCocos({ viewName: VIEW_NAME });
+      this.entered = true;
+      truewatchSdk.rum.addAction('hybrid_sample_entered_cocos', 'launch', ATTRIBUTES);
+      truewatchSdk.logger.log('Creator 2 Hybrid sample entered Cocos', 'info', ATTRIBUTES);
+      this.setStatus('Cocos page active · automatic and manual network samples ready', COLORS.primary);
+    });
+  }
+
+  leaveCocosPage(): void {
+    if (!this.entered) return;
+    truewatchSdk.leaveCocos();
+    this.entered = false;
+  }
+
+  private emitRumAndLog(): void {
+    const attributes = { ...ATTRIBUTES, button: 'rum_log', emitted_at: Date.now() };
+    truewatchSdk.rum.addAction('creator2_rum_log_clicked', 'click', attributes);
+    truewatchSdk.logger.log('Creator 2 sample emitted a RUM Action and linked Log', 'info', attributes);
+    this.setStatus('RUM Action + linked Log emitted', COLORS.primary);
+  }
+
+  private emitAutomaticResource(): void {
+    const url = `${AUTO_TEST_URL}&request_id=${Date.now().toString(36)}-${++this.resourceSequence}`;
+    const attributes = { ...ATTRIBUTES, collection_mode: 'automatic', request_url: url };
+    const request = new XMLHttpRequest();
+    request.open('GET', url, true);
+    request.timeout = 12_000;
+    this.setStatus('Automatic XHR in progress · SDK owns Resource and Trace', COLORS.info);
+    request.onload = () => {
+      const failed = request.status < 200 || request.status >= 400;
+      truewatchSdk.logger.log(
+        `Creator 2 automatic network completed with status ${request.status}`,
+        failed ? 'warning' : 'info',
+        attributes,
+      );
+      this.setStatus(
+        failed ? `Automatic Resource failed (${request.status})` : `Automatic Resource + Trace reported (${request.status})`,
+        failed ? COLORS.warning : COLORS.primary,
+      );
+    };
+    request.onerror = () => this.setStatus('Automatic Resource failed (network error)', COLORS.warning);
+    request.ontimeout = () => this.setStatus('Automatic Resource failed (timeout)', COLORS.warning);
+    request.send();
+  }
+
+  private emitManualTraceResource(): void {
+    const methods = this.untrackedXhr;
+    if (!methods) {
+      this.setStatus('Original XHR methods are unavailable for the manual sample', COLORS.danger);
+      return;
+    }
+    const resourceKey = `creator2-manual-trace-${Date.now().toString(36)}-${++this.resourceSequence}`;
+    const startedAt = nowNs();
+    const traceHeaders = truewatchSdk.trace.getHeaders(TRACE_TEST_URL, resourceKey);
+    const attributes = {
+      ...ATTRIBUTES,
+      collection_mode: 'manual',
+      resource_key: resourceKey,
+      trace_link_rum: true,
+    };
+
+    truewatchSdk.rum.startResource(resourceKey, attributes);
+    truewatchSdk.rum.addAction('creator2_trace_request_started', 'network', attributes);
+    this.setStatus('Trace headers generated; request in progress…', COLORS.info);
+
+    const request = new XMLHttpRequest();
+    methods.open.call(request, 'GET', TRACE_TEST_URL, true);
+    Object.keys(traceHeaders).forEach((name) => methods.setRequestHeader.call(request, name, traceHeaders[name]));
+    request.timeout = 12_000;
+
+    let completed = false;
+    const finish = (statusCode: number, responseBody: string, failed: boolean): void => {
+      if (completed) return;
+      completed = true;
+      const finishedAt = nowNs();
+      truewatchSdk.rum.stopResource(resourceKey, { ...attributes, request_failed: failed });
+      truewatchSdk.rum.addResource(resourceKey, {
+        url: TRACE_TEST_URL,
+        httpMethod: 'GET',
+        requestHeaders: traceHeaders,
+        statusCode,
+        responseContentType: request.getResponseHeader('content-type') || undefined,
+        responseBody: responseBody.slice(0, 256),
+      }, {
+        fetchStartTime: startedAt,
+        responseStartTime: finishedAt,
+        responseEndTime: finishedAt,
+      });
+      truewatchSdk.logger.log(
+        `Creator 2 trace test completed with status ${statusCode}`,
+        failed ? 'warning' : 'info',
+        attributes,
+      );
+      this.setStatus(
+        failed ? `Trace test failed (${statusCode}); Resource was still reported` : `Trace + linked RUM Resource reported (${statusCode})`,
+        failed ? COLORS.warning : COLORS.primary,
+      );
+    };
+
+    request.onload = () => finish(request.status, request.responseText || '', request.status < 200 || request.status >= 400);
+    request.onerror = () => finish(0, 'network error', true);
+    request.ontimeout = () => finish(0, 'request timeout', true);
+    methods.send.call(request);
+  }
+
+  private emitError(): void {
+    const error = new Error('Creator 2 Hybrid sample diagnostic error');
+    const attributes = { ...ATTRIBUTES, error_source: 'manual_button' };
+    truewatchSdk.rum.addAction('creator2_error_clicked', 'click', attributes);
+    truewatchSdk.rum.addError(error.message, error.stack || '', 'sample_error', 'run', attributes);
+    truewatchSdk.logger.log(error.message, 'error', attributes);
+    this.setStatus('RUM Error + linked error Log emitted', COLORS.danger);
+  }
+
+  private changeReplayState(): void {
+    this.replayState += 1;
+    const palette = [COLORS.info, COLORS.primary, COLORS.warning, COLORS.danger];
+    const color = palette[this.replayState % palette.length];
+    if (this.replayCard) {
+      this.replayCard.clear();
+      this.replayCard.fillColor = color;
+      this.replayCard.roundRect(-360, -50, 720, 100, 18);
+      this.replayCard.fill();
+    }
+    const attributes = { ...ATTRIBUTES, replay_state: this.replayState };
+    truewatchSdk.rum.addAction('creator2_replay_state_changed', 'click', attributes);
+    truewatchSdk.logger.log(`Replay visual state changed to ${this.replayState}`, 'info', attributes);
+    this.setStatus(`Replay visual state changed: ${this.replayState}`, color);
+  }
+
+  private toggleMaskCamera(): void {
+    const camera = this.replayCamera;
+    if (!camera) return;
+    camera.node.is3DNode = !camera.node.is3DNode;
+    const scenario = camera.node.is3DNode ? 'camera_3d' : 'camera_2d';
+    truewatchSdk.rum.addAction('creator2_mask_camera_changed', 'click', { ...ATTRIBUTES, mask_scenario: scenario });
+    this.setStatus(`Mask verification: ${scenario} · private token must stay gray in Replay`, COLORS.primary);
+  }
+
+  private openNativePage(): void {
+    try {
+      this.leaveCocosPage();
+      this.setStatus('Returning RUM View and Replay ownership to the native page…', COLORS.info);
+      if (cc.sys.os === cc.sys.OS_ANDROID) {
+        callNativeStatic(
+          'com/truewatch/cocos/sample/HybridSampleSdk',
+          'returnToNative',
+          '()V',
+        );
+        return;
+      }
+      if (cc.sys.os === cc.sys.OS_IOS) {
+        callNativeStatic('HybridSampleSDK', 'showNativePage');
+        this.waitForNativeReturn();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.setStatus(`Unable to open native page: ${message}`, COLORS.danger);
+    }
+  }
+
+  private waitForNativeReturn(): void {
+    if (this.waitingForNativeReturn) return;
+    this.waitingForNativeReturn = true;
+    const check = (): void => {
+      if (!this.isNativePageVisible()) {
+        this.waitingForNativeReturn = false;
+        try {
+          this.enterCocosPage();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.setStatus(`Unable to re-enter Cocos: ${message}`, COLORS.danger);
+        }
+        return;
+      }
+      setTimeout(check, 200);
+    };
+    setTimeout(check, 200);
+  }
+
+  private isNativePageVisible(): boolean {
+    if (cc.sys.os === cc.sys.OS_ANDROID) {
+      return callNativeStatic(
+        'com/truewatch/cocos/sample/HybridSampleSdk',
+        'isNativePageVisible',
+        '()Z',
+      ) === true;
+    }
+    if (cc.sys.os === cc.sys.OS_IOS) {
+      return callNativeStatic('HybridSampleSDK', 'isNativePageVisible') === true;
+    }
+    return false;
+  }
+
+  private createScene(): { root: cc.Node; camera: cc.Camera } {
+    const scene = new cc.Scene();
+    scene.name = VIEW_NAME;
+
+    const cameraNode = new cc.Node('ReplayCamera');
+    cameraNode.z = 1000;
+    scene.addChild(cameraNode);
+    const camera = cameraNode.addComponent(cc.Camera);
+    camera.ortho = true;
+    camera.orthoSize = Math.max(320, cc.view.getVisibleSize().height / 2);
+    camera.backgroundColor = COLORS.background;
+
+    const canvasNode = new cc.Node('Canvas');
+    canvasNode.setContentSize(960, 640);
+    scene.addChild(canvasNode);
+    const canvas = canvasNode.addComponent(cc.Canvas);
+    canvas.designResolution = cc.size(960, 640);
+    canvas.fitHeight = true;
+    canvas.camera = camera;
+
+    const root = new cc.Node('HybridTelemetryUI');
+    root.setContentSize(960, 640);
+    canvasNode.addChild(root);
+    cc.director.runSceneImmediate(scene);
+    return { root, camera };
+  }
+
+  private render(root: cc.Node): void {
+    this.panel(root, 'Background', 0, 0, 960, 640, COLORS.background);
+    this.label(root, 'Cocos Hybrid · Creator 2', 0, 258, 860, 48, 34, COLORS.text);
+    this.label(root, 'Native host owns SDK modules; Cocos attaches RUM automation and canvas Replay.', 0, 218, 860, 30, 17, COLORS.muted);
+
+    const replayNode = this.panel(root, 'ReplayVisualState', 0, 125, 720, 100, COLORS.info);
+    this.replayCard = replayNode.getComponent(cc.Graphics) || undefined;
+    this.label(replayNode, 'SESSION REPLAY VISUAL STATE', -125, 10, 390, 28, 22, COLORS.text);
+    this.label(replayNode, 'The token at right must be gray in Replay.', -125, -24, 390, 24, 15, COLORS.text);
+    this.privacyMaskProbe = this.panel(replayNode, 'PrivacyMaskProbe', 225, 0, 220, 70, COLORS.danger);
+    this.label(this.privacyMaskProbe, 'PRIVATE TOKEN\nMASK-ME-8391', 0, 0, 190, 52, 17, COLORS.text);
+
+    this.button(root, 'AutoNetwork', 'Auto Network', -270, 28, 220, 56, () => this.emitAutomaticResource(), COLORS.info);
+    this.button(root, 'ManualNetwork', 'Manual Trace', 0, 28, 220, 56, () => this.emitManualTraceResource(), COLORS.primary);
+    this.button(root, 'RumLog', 'RUM + Log', 270, 28, 220, 56, () => this.emitRumAndLog(), COLORS.primary);
+    this.button(root, 'RumError', 'RUM Error', -270, -48, 220, 56, () => this.emitError(), COLORS.danger);
+    this.button(root, 'ReplayChange', 'Replay change', 0, -48, 220, 56, () => this.changeReplayState(), COLORS.warning);
+    this.button(root, 'NativePage', 'Native page', 270, -48, 220, 56, () => this.openNativePage(), COLORS.info);
+    this.button(root, 'MaskCamera', 'Mask: toggle 2D/3D', 0, -108, 260, 40, () => this.toggleMaskCamera(), COLORS.primary);
+
+    const statusPanel = this.panel(root, 'StatusPanel', 0, -180, 780, 84, COLORS.panel);
+    this.status = this.label(statusPanel, 'Preparing Hybrid integration…', 0, 0, 730, 50, 18, COLORS.muted);
+    this.label(root, `View: ${VIEW_NAME}`, 0, -258, 820, 24, 15, COLORS.muted);
+  }
+
+  private panel(parent: cc.Node, name: string, x: number, y: number, width: number, height: number, color: cc.Color): cc.Node {
+    const node = new cc.Node(name);
+    parent.addChild(node);
+    node.setPosition(x, y);
+    node.setContentSize(width, height);
+    const graphics = node.addComponent(cc.Graphics);
+    graphics.fillColor = color;
+    graphics.roundRect(-width / 2, -height / 2, width, height, Math.min(18, height / 4));
+    graphics.fill();
+    return node;
+  }
+
+  private button(parent: cc.Node, name: string, text: string, x: number, y: number, width: number, height: number, onClick: () => void, color: cc.Color): void {
+    const node = this.panel(parent, name, x, y, width, height, color);
+    node.addComponent(cc.Button);
+    node.on('click', onClick);
+    this.label(node, text, 0, 0, width - 16, height - 8, 18, COLORS.text);
+  }
+
+  private label(parent: cc.Node, text: string, x: number, y: number, width: number, height: number, fontSize: number, color: cc.Color): cc.Label {
+    const node = new cc.Node(`Label-${text.slice(0, 18)}`);
+    parent.addChild(node);
+    node.setPosition(x, y);
+    const label = node.addComponent(cc.Label);
+    label.useSystemFont = true;
+    label.fontFamily = 'Arial';
+    // Adding cc.Label starts in Overflow.NONE and resets the node size. Set the
+    // overflow policy first, then restore the intended layout bounds.
+    label.overflow = cc.Label.Overflow.CLAMP;
+    node.setContentSize(width, height);
+    label.string = text;
+    label.fontSize = fontSize;
+    label.lineHeight = Math.ceil(fontSize * 1.3);
+    label.node.color = color;
+    label.horizontalAlign = cc.Label.HorizontalAlign.CENTER;
+    label.verticalAlign = cc.Label.VerticalAlign.CENTER;
+    return label;
+  }
+
+  private setStatus(text: string, color: cc.Color): void {
+    if (!this.status || !cc.isValid(this.status.node)) return;
+    this.status.string = text;
+    this.status.node.color = color;
+  }
+}
+
+function nowNs(): number {
+  return Date.now() * 1_000_000;
+}
+
+function callNativeStatic(...argumentsList: unknown[]): unknown {
+  const call = jsb.reflection.callStaticMethod as (...values: unknown[]) => unknown;
+  return call(...argumentsList);
+}

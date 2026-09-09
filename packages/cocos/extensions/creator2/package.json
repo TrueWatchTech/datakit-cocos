@@ -1,0 +1,6 @@
+{
+  "name": "truewatch-cocos-sdk",
+  "version": "0.1.0",
+  "description": "Observability SDK native build integration for Cocos Creator",
+  "main": "main.js"
+}

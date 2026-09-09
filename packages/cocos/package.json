@@ -1,0 +1,60 @@
+{
+  "name": "@truewatchtech/cocos-sdk",
+  "version": "0.1.0-alpha.3",
+  "description": "Observability SDK integration for Cocos Creator 2.4 and 3.x",
+  "license": "Apache-2.0",
+  "author": "TrueWatch",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TrueWatchTech/datakit-cocos.git",
+    "directory": "packages/cocos"
+  },
+  "homepage": "https://github.com/TrueWatchTech/datakit-cocos#readme",
+  "bugs": {
+    "url": "https://github.com/TrueWatchTech/datakit-cocos/issues"
+  },
+  "keywords": [
+    "truewatch",
+    "cocos-creator",
+    "rum",
+    "session-replay",
+    "observability"
+  ],
+  "exports": {
+    "./creator2": {
+      "types": "./dist/creator2/creator2/index.d.ts",
+      "require": "./dist/creator2/creator2/index.js",
+      "default": "./dist/creator2/creator2/index.js"
+    },
+    "./creator3": {
+      "types": "./dist/creator3/creator3/index.d.ts",
+      "import": "./dist/creator3/creator3/index.js",
+      "default": "./dist/creator3/creator3/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "creator2",
+    "creator3",
+    "dist",
+    "extensions",
+    "native",
+    "bin",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "bin": {
+    "truewatch-cocos": "bin/cli.cjs"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "cocosSdk": {
+    "creator2": "2.4.5-2.4.15",
+    "creator3": "3.6.3-3.8.x"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

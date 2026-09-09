@@ -1,0 +1,51 @@
+{
+  "name": "Cocos Hybrid Creator 3",
+  "platform": "android",
+  "buildPath": "project://build",
+  "debug": true,
+  "mainBundleCompressionType": "merge_dep",
+  "startScene": "0bb6c936-f802-485d-a36b-ea502feff95d",
+  "outputName": "android",
+  "taskName": "android",
+  "scenes": [
+    {
+      "url": "db://assets/HybridTelemetry.scene",
+      "uuid": "0bb6c936-f802-485d-a36b-ea502feff95d"
+    }
+  ],
+  "packages": {
+    "android": {
+      "packageName": "com.truewatch.sample.cocos.hybrid.creator3",
+      "orientation": {
+        "landscapeRight": true,
+        "landscapeLeft": true,
+        "portrait": false,
+        "upsideDown": false
+      },
+      "apiLevel": 34,
+      "appABIs": [
+        "arm64-v8a",
+        "armeabi-v7a"
+      ],
+      "isSoFileCompressed": true,
+      "useDebugKeystore": true,
+      "appBundle": false,
+      "androidInstant": false,
+      "inputSDK": false,
+      "remoteUrl": "",
+      "swappy": false,
+      "renderBackEnd": {
+        "vulkan": false,
+        "gles3": true,
+        "gles2": true
+      }
+    },
+    "native": {
+      "encrypted": false,
+      "xxteaKey": "",
+      "compressZip": false,
+      "JobSystem": "none",
+      "__version__": "1.0.2"
+    }
+  }
+}

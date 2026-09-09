@@ -1,0 +1,10 @@
+/node_modules/
+/library/
+/local/
+/temp/
+/build/
+/profiles/
+/packages/truewatch-cocos-sdk/
+/native-host/android/HybridSampleEnvironment.java
+/native-host/ios/HybridSampleEnvironment.generated.h
+*.log
