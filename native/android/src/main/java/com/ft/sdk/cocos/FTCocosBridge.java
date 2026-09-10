@@ -124,6 +124,10 @@ public final class FTCocosBridge {
 
     private static Object dispatch(String method, JSONObject payload) throws Exception {
         switch (method) {
+            case "replay.beginSaveImage":
+                return FTCocosReplayImageJobs.begin(payload);
+            case "replay.pollSaveImage":
+                return FTCocosReplayImageJobs.poll(payload.getString("job"));
             case "hybrid.attach":
                 attachHybrid(payload);
                 return null;

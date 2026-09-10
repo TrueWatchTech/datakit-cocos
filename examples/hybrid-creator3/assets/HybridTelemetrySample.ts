@@ -1,3 +1,4 @@
+import ReplayPrivacy, { ReplayPrivacyMode } from './truewatch-cocos-sdk/ReplayPrivacy';
 import {
   _decorator,
   Button,
@@ -69,6 +70,8 @@ class HybridTelemetryRuntime {
   private status?: Label;
   private replayCard?: Graphics;
   private privacyMaskProbe?: Node;
+  private privacyProbeGroup?: Node;
+  private privacyLayoutMoved = false;
   private replayState = 0;
   private maskShowAll = false;
   private resourceSequence = 0;
@@ -106,7 +109,6 @@ class HybridTelemetryRuntime {
           network: true,
         },
       });
-      if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask');
       if (this.isNativePageVisible()) {
         this.setStatus('Hybrid attached · waiting for the native page to open Cocos', COLORS.info);
         this.waitForNativeReturn();
@@ -242,7 +244,7 @@ class HybridTelemetryRuntime {
     if (this.replayCard) {
       this.replayCard.clear();
       this.replayCard.fillColor = color;
-      this.replayCard.roundRect(-360, -50, 720, 100, 18);
+      this.replayCard.roundRect(-360, -70, 720, 140, 18);
       this.replayCard.fill();
     }
     const attributes = { ...ATTRIBUTES, replay_state: this.replayState };
@@ -257,6 +259,16 @@ class HybridTelemetryRuntime {
     view.setDesignResolutionSize(960, 640, this.maskShowAll ? ResolutionPolicy.SHOW_ALL : ResolutionPolicy.FIXED_HEIGHT);
     truewatchSdk.rum.addAction('creator3_mask_fit_changed', 'click', { ...ATTRIBUTES, mask_scenario: scenario });
     this.setStatus(`Mask verification: ${scenario} · private token must stay gray in Replay`, COLORS.primary);
+  }
+
+  private togglePrivacyLayout(): void {
+    this.privacyLayoutMoved = !this.privacyLayoutMoved;
+    const group = this.privacyProbeGroup;
+    if (!group) return;
+    const scale = this.privacyLayoutMoved ? 0.85 : 1;
+    group.setPosition(this.privacyLayoutMoved ? 36 : 0, this.privacyLayoutMoved ? 112 : 125);
+    group.setScale(scale, scale, 1);
+    this.setStatus('Privacy layout changed: only the three red targets should be masked in Replay', COLORS.primary);
   }
 
   private openNativePage(): void {
@@ -346,12 +358,33 @@ class HybridTelemetryRuntime {
     this.label(root, 'Cocos Hybrid · Creator 3', 0, 258, 860, 48, 34, COLORS.text);
     this.label(root, 'Native host owns SDK modules; Cocos attaches RUM automation and canvas Replay.', 0, 218, 860, 30, 17, COLORS.muted);
 
-    const replayNode = this.panel(root, 'ReplayVisualState', 0, 125, 720, 100, COLORS.info);
+    const replayNode = this.panel(root, 'ReplayVisualState', 0, 125, 720, 140, COLORS.panel);
+    this.privacyProbeGroup = replayNode;
     this.replayCard = replayNode.getComponent(Graphics) || undefined;
-    this.label(replayNode, 'SESSION REPLAY VISUAL STATE', -125, 10, 390, 28, 22, COLORS.text);
-    this.label(replayNode, 'The token at right must be gray in Replay.', -125, -24, 390, 24, 15, COLORS.text);
-    this.privacyMaskProbe = this.panel(replayNode, 'PrivacyMaskProbe', 225, 0, 220, 70, COLORS.danger);
-    this.label(this.privacyMaskProbe, 'PRIVATE TOKEN\nMASK-ME-8391', 0, 0, 190, 52, 17, COLORS.text);
+    this.label(replayNode, 'COMPONENT MASK', -230, 49, 200, 22, 15, COLORS.text);
+    this.label(replayNode, 'COMPONENT HIDE', 0, 49, 200, 22, 15, COLORS.text);
+    this.label(replayNode, 'CODE MASK', 230, 49, 200, 22, 15, COLORS.text);
+
+    const componentMask = this.panel(replayNode, 'ComponentMaskProbe', -230, 0, 180, 58, COLORS.danger, true);
+    componentMask.addComponent(ReplayPrivacy);
+    this.label(componentMask, 'PRIVATE TOKEN\nCOMPONENT-3141', 0, 0, 170, 48, 15, COLORS.text);
+    const componentHide = this.panel(replayNode, 'ComponentHideProbe', 0, 0, 180, 58, COLORS.danger, true);
+    componentHide.addComponent(ReplayPrivacy).mode = ReplayPrivacyMode.Hide;
+    this.label(componentHide, 'PRIVATE TOKEN\nHIDE-ME-2718', 0, 0, 170, 48, 15, COLORS.text);
+    this.privacyMaskProbe = this.panel(replayNode, 'PrivacyMaskProbe', 230, 0, 180, 58, COLORS.danger, true);
+    this.label(this.privacyMaskProbe, 'PRIVATE TOKEN\nMASK-ME-8391', 0, 0, 170, 48, 15, COLORS.text);
+    truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask');
+
+    // Guards are siblings: including them in a private subtree would mask them too.
+    [-230, 0, 230].forEach((x, index) => {
+      this.panel(replayNode, `PublicGuardLeft${index}`, x - 94, 0, 4, 58, COLORS.primary, true);
+      this.panel(replayNode, `PublicGuardRight${index}`, x + 94, 0, 4, 58, COLORS.primary, true);
+      this.panel(replayNode, `PublicGuardTop${index}`, x, 33, 180, 4, COLORS.primary, true);
+      this.panel(replayNode, `PublicGuardBottom${index}`, x, -33, 180, 4, COLORS.primary, true);
+    });
+    this.label(replayNode, 'KEEP\nME', -115, 0, 38, 44, 12, COLORS.text);
+    this.label(replayNode, 'KEEP\nME', 115, 0, 38, 44, 12, COLORS.text);
+    this.label(replayNode, 'PUBLIC: all green edges and KEEP ME labels must stay visible', 0, -52, 690, 22, 15, COLORS.primary);
 
     this.button(root, 'AutoNetwork', 'Auto Network', -270, 28, 220, 56, () => this.emitAutomaticResource(), COLORS.info);
     this.button(root, 'ManualNetwork', 'Manual Trace', 0, 28, 220, 56, () => this.emitManualTraceResource(), COLORS.primary);
@@ -359,14 +392,16 @@ class HybridTelemetryRuntime {
     this.button(root, 'RumError', 'RUM Error', -270, -48, 220, 56, () => this.emitError(), COLORS.danger);
     this.button(root, 'ReplayChange', 'Replay change', 0, -48, 220, 56, () => this.changeReplayState(), COLORS.warning);
     this.button(root, 'NativePage', 'Native page', 270, -48, 220, 56, () => this.openNativePage(), COLORS.info);
-    this.button(root, 'MaskFit', 'Mask: toggle fit', 0, -108, 260, 40, () => this.toggleMaskFit(), COLORS.primary);
+    this.button(root, 'MaskFit', 'Mask: toggle fit', -180, -108, 300, 40, () => this.toggleMaskFit(), COLORS.primary);
+
+    this.button(root, 'PrivacyLayout', 'Mask: move + scale', 180, -108, 300, 40, () => this.togglePrivacyLayout(), COLORS.primary);
 
     const statusPanel = this.panel(root, 'StatusPanel', 0, -180, 780, 84, COLORS.panel);
     this.status = this.label(statusPanel, 'Preparing Hybrid integration…', 0, 0, 730, 50, 18, COLORS.muted);
     this.label(root, `View: ${VIEW_NAME}`, 0, -258, 820, 24, 15, COLORS.muted);
   }
 
-  private panel(parent: Node, name: string, x: number, y: number, width: number, height: number, color: Color): Node {
+  private panel(parent: Node, name: string, x: number, y: number, width: number, height: number, color: Color, square = false): Node {
     const node = new Node(name);
     node.layer = Layers.Enum.UI_2D;
     parent.addChild(node);
@@ -374,7 +409,8 @@ class HybridTelemetryRuntime {
     node.addComponent(UITransform).setContentSize(width, height);
     const graphics = node.addComponent(Graphics);
     graphics.fillColor = color;
-    graphics.roundRect(-width / 2, -height / 2, width, height, Math.min(18, height / 4));
+    if (square) graphics.rect(-width / 2, -height / 2, width, height);
+    else graphics.roundRect(-width / 2, -height / 2, width, height, Math.min(18, height / 4));
     graphics.fill();
     return node;
   }

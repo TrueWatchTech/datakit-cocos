@@ -1,6 +1,6 @@
 {
   "name": "cocos-sdk-workspace",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "Observability SDK integration workspace for Cocos Creator",
   "private": true,
   "license": "Apache-2.0",

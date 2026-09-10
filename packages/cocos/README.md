@@ -24,7 +24,7 @@ Cocos Creator 3.0–3.6.2 is supported on a best-effort basis because the stable
 
 ## Documentation
 
-[Documentation Center](https://docs.truewatch.com/real-user-monitoring/cocos/app-access/)
+For installation, configuration, and usage, see the [official documentation](https://docs.truewatch.com/real-user-monitoring/cocos/app-access/).
 
 ## License
 

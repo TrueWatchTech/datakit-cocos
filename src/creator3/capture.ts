@@ -2,7 +2,9 @@ import { Camera, Director, EditBox, RenderTexture, UITransform, Vec3, director, 
 import type { FTCanvasCapture } from '../core/replay.js';
 import type { FTCapturedFrame, FTPrivacyRegion, FTReplayPrivacyMode, FTStoredFrame } from '../core/types.js';
 import { frameFingerprint } from '../core/replay.js';
+import { persistReplayFrame, disposeReplayFrame } from '../core/replay-file.js';
 import { projectPrivacyBounds } from '../core/replay-privacy.js';
+import { collectReplayPrivacyNodes } from '../core/replay-privacy-nodes.js';
 import { waitForRenderTextureReadback } from './replay-render-cycle.js';
 
 export class FTCreator3CanvasCapture implements FTCanvasCapture {
@@ -61,15 +63,11 @@ export class FTCreator3CanvasCapture implements FTCanvasCapture {
   }
 
   async persist(frame: FTCapturedFrame, fingerprint = frameFingerprint(frame.rgba)): Promise<FTStoredFrame> {
-    const path = `${native.fileUtils.getWritablePath()}cocos-sdk-replay-${fingerprint}.rgba`;
-    if (!native.fileUtils.writeDataToFile(frame.rgba, path)) {
-      throw new Error(`Unable to persist replay frame: ${path}`);
-    }
-    return { path, width: frame.width, height: frame.height, timestamp: frame.timestamp, fingerprint };
+    return persistReplayFrame(frame, fingerprint, native.fileUtils.getWritablePath());
   }
 
-  disposeStoredFrame(frame: FTStoredFrame): void {
-    if (native.fileUtils.isFileExist(frame.path)) native.fileUtils.removeFile(frame.path);
+  disposeStoredFrame(frame: FTStoredFrame): Promise<void> {
+    return disposeReplayFrame(frame);
   }
 
   private collectPrivacyRegions(
@@ -77,10 +75,12 @@ export class FTCreator3CanvasCapture implements FTCanvasCapture {
     width: number,
     height: number,
   ): FTPrivacyRegion[] {
-    const nodes = new Map(this.privacy);
-    director.getScene()?.getComponentsInChildren(EditBox)?.forEach((editBox: any) => {
-      if (!nodes.has(editBox.node)) nodes.set(editBox.node, 'mask');
-    });
+    const scene = director.getScene();
+    const nodes = collectReplayPrivacyNodes(
+      this.privacy,
+      scene?.getComponentsInChildren('ReplayPrivacy') || [],
+      scene?.getComponentsInChildren(EditBox) || [],
+    );
     const regions: FTPrivacyRegion[] = [];
     nodes.forEach((mode, node: any) => {
       const bounds = node?.getComponent?.(UITransform)?.getBoundingBoxToWorld?.();

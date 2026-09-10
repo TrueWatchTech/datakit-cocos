@@ -16,3 +16,6 @@
 /settings/v2/packages/information.json
 /settings/v2/packages/program.json
 *.log
+
+# Installed by npm run sdk:install; preserve generated .meta files on reinstall.
+/assets/truewatch-cocos-sdk/

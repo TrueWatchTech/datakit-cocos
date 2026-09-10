@@ -1,8 +1,13 @@
 import { parseTransportResponse, type FTNativeTransport } from '../core/transport.js';
 import type { FTValue } from '../core/types.js';
+import { invokeReplayAsync } from '../core/replay-async-transport.js';
 
 export class FTCreator2Transport implements FTNativeTransport {
   readonly platform: 'android' | 'ios' | 'unsupported' = resolveCreator2Platform();
+
+  invokeAsync<T = FTValue>(method: string, payload?: unknown): Promise<T | undefined> {
+    return invokeReplayAsync<T>(this, method, payload);
+  }
 
   invoke<T = FTValue>(method: string, payload?: unknown): T | undefined {
     if (this.platform === 'unsupported') return undefined;

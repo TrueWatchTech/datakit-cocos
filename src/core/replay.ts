@@ -25,7 +25,7 @@ export interface FTCanvasCapture {
   getViewportSize?(): { width: number; height: number } | undefined;
   capture(maxImageDimension: number): Promise<FTCapturedFrame | undefined>;
   persist(frame: FTCapturedFrame, fingerprint: string): Promise<FTStoredFrame>;
-  disposeStoredFrame(frame: FTStoredFrame): void;
+  disposeStoredFrame(frame: FTStoredFrame): void | Promise<void>;
   setPrivacy(node: unknown, mode: 'mask' | 'hide' | 'unmask'): void;
 }
 
@@ -174,8 +174,9 @@ export class FTSessionReplay {
    * Changes the Session Replay privacy treatment for a Cocos node.
    *
    * `mask` obscures the node, `hide` removes the region from the replay, and
-   * `unmask` clears an earlier override. The node must belong to the active
-   * Cocos scene.
+   * `unmask` clears an earlier code override, restoring any ReplayPrivacy
+   * component rule or default input masking. Code overrides take priority over
+   * a component on the same node. The node must belong to the active Cocos scene.
    *
    * @param node - Cocos node whose rendered bounds receive the privacy rule.
    * @param mode - Privacy treatment to apply.
@@ -254,7 +255,8 @@ export class FTSessionReplay {
       }
       stored = await this.capture.persist(frame, fingerprint);
       if (generation !== this.captureGeneration) return false;
-      const saved = this.saveImage(stored, decision.compressionQuality, decision.maxFrameBytes);
+      const saved = await this.saveImage(stored, decision.compressionQuality, decision.maxFrameBytes);
+      if (generation !== this.captureGeneration) return false;
       if (!saved) {
         emitReplayDiagnostic({ type: 'capture_skipped', timestamp: now, reason: 'budget' });
         return this.writePendingPointers(context, frame.width, frame.height);
@@ -304,6 +306,7 @@ export class FTSessionReplay {
       this.lastViewportSize = viewportSize;
       return true;
     } catch (error) {
+      if (generation !== this.captureGeneration) return false;
       emitReplayDiagnostic({ type: 'capture_skipped', timestamp: Date.now(), reason: 'error' });
       console.error('[cocos-sdk] Session Replay frame dropped:', error);
       if (context && pointerSize) {
@@ -315,8 +318,11 @@ export class FTSessionReplay {
       }
       return false;
     } finally {
-      if (stored) this.capture.disposeStoredFrame(stored);
-      this.busy = false;
+      try {
+        if (stored) await this.capture.disposeStoredFrame(stored);
+      } finally {
+        this.busy = false;
+      }
     }
   }
 
@@ -381,14 +387,14 @@ export class FTSessionReplay {
     return normalizeRumContext(value);
   }
 
-  private saveImage(
+  private async saveImage(
     stored: FTStoredFrame,
     compressionQuality: number,
     maxFrameBytes: number,
-  ): FTReplaySavedImage | undefined {
+  ): Promise<FTReplaySavedImage | undefined> {
     if (this.imagePolicyEnabled && this.supportsSaveImageV2 !== false) {
       try {
-        const value = this.transport.invoke('replay.saveImageV2', {
+        const value = await this.invokeSaveImage('replay.saveImageV2', {
           path: stored.path,
           width: stored.width,
           height: stored.height,
@@ -407,7 +413,7 @@ export class FTSessionReplay {
       }
     }
 
-    const resourceId = this.transport.invoke('replay.saveImage', {
+    const resourceId = await this.invokeSaveImage('replay.saveImage', {
       path: stored.path,
       width: stored.width,
       height: stored.height,
@@ -423,6 +429,12 @@ export class FTSessionReplay {
       byteSizeSource: 'frame_limit_estimate',
       ...(this.transport.platform === 'ios' ? { mimeType: 'image/png' as const } : {}),
     };
+  }
+
+  private invokeSaveImage(method: string, payload: unknown): Promise<unknown> {
+    return this.transport.invokeAsync
+      ? this.transport.invokeAsync(method, payload)
+      : Promise.resolve(this.transport.invoke(method, payload));
   }
 
   private writePendingPointers(context: FTRUMContext, width: number, height: number): boolean {

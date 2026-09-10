@@ -15,6 +15,39 @@ afterEach(() => {
 });
 
 describe('native build integration', () => {
+  it.each(['AppDelegate.cpp', 'Game.cpp'])('installs the async file binding before scripts start in %s', (name) => {
+    const root = mkdtempSync(join(tmpdir(), 'cocos-replay-install-'));
+    temporaryRoots.push(root);
+    const classes = join(root, 'Classes');
+    mkdirSync(classes);
+    const entry = join(classes, name);
+    const anchor = name === 'Game.cpp' ? 'BaseGame::init();' : 'se->start();';
+    writeFileSync(entry, `void start() {\n  ${anchor}\n}\n`);
+    installNative(root, resolve('.'), { info() {}, warn() {} });
+    const first = readFileSync(entry, 'utf8');
+    installNative(root, resolve('.'), { info() {}, warn() {} });
+    expect(readFileSync(entry, 'utf8')).toBe(first);
+    expect(first.indexOf('installReplayFileBridge();')).toBeLessThan(first.indexOf(anchor));
+    expect(first).toContain('"cocos-sdk-replay/FTReplayFileBridge.h"');
+    expect(readFileSync(join(classes, 'cocos-sdk-replay', 'FTReplayFileWorker.h'), 'utf8'))
+      .toContain('class ReplayFileWorker');
+  });
+
+  it('installs the binding in Creator 3 native sources outside the build directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cocos-replay-external-'));
+    temporaryRoots.push(root);
+    const build = join(root, 'build');
+    const native = join(root, 'native', 'engine');
+    const classes = join(native, 'common', 'Classes');
+    mkdirSync(build, { recursive: true });
+    mkdirSync(classes, { recursive: true });
+    writeFileSync(join(build, 'gradle.properties'), `NATIVE_DIR=${join(native, 'android')}\n`);
+    const entry = join(classes, 'Game.cpp');
+    writeFileSync(entry, 'void start() { BaseGame::init(); }');
+    installNative(build, resolve('.'), { info() {}, warn() {} });
+    expect(readFileSync(entry, 'utf8')).toContain('ft_cocos::installReplayFileBridge();');
+  });
+
   it('ships native-host attachment and recorder ownership bridge methods', () => {
     const android = readFileSync(
       resolve('native/android/src/main/java/com/ft/sdk/cocos/FTCocosBridge.java'),
@@ -45,7 +78,7 @@ describe('native build integration', () => {
     const podspec = readFileSync(resolve('native/ios/FTCocosBridge.podspec'), 'utf8');
 
     expect(installer).toContain('ft-sdk:1.7.6-alpha02');
-    expect(installer).toContain('ft-session-replay:0.1.9-alpha02');
+    expect(installer).toContain('ft-session-replay:0.1.9-alpha03');
     expect(podspec).toContain("s.dependency 'TrueWatchSDK/Agent', '1.6.8-alpha.2'");
     expect(podspec).toContain("s.dependency 'TrueWatchSDK/FTSessionReplay', '1.6.8-alpha.2'");
   });
@@ -85,7 +118,7 @@ describe('native build integration', () => {
     const podfileText = readFileSync(podfile, 'utf8');
     expect(gradleText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
     expect(gradleText).toContain('https://mvnrepo.truewatch.com/repository/maven-releases');
-    expect(gradleText).toContain('ft-session-replay:0.1.9-alpha02');
+    expect(gradleText).toContain('ft-session-replay:0.1.9-alpha03');
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain("platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')");
     expect(gradlePropertiesText).toContain('PROP_COMPILE_SDK_VERSION=34');
@@ -122,7 +155,7 @@ describe('native build integration', () => {
     installNative(buildRoot, extension, { info() {}, warn() {} });
 
     const gradleText = readFileSync(gradle, 'utf8');
-    expect(gradleText).toContain('ft-session-replay:0.1.9-alpha02');
+    expect(gradleText).toContain('ft-session-replay:0.1.9-alpha03');
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain(join(
       buildRoot,

@@ -30,6 +30,11 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   const buildNative = path.join(buildRoot, 'cocos-sdk-native');
   copyDirectory(nativeSource, buildNative);
   const files = findFiles(buildRoot, 7);
+  const replayHeader = path.join(buildNative, 'shared', 'FTReplayFileBridge.h');
+  if (fs.existsSync(replayHeader)) {
+    findReplayEntryFiles(files)
+      .forEach((file) => patchReplayFileBridge(file, replayHeader));
+  }
   const gradlePropertiesFiles = files.filter((file) => path.basename(file) === 'gradle.properties');
   const gradleFiles = uniqueFiles([
     ...files.filter((file) => /(?:^|\/)app\/build\.gradle$/.test(normalize(file))),
@@ -59,6 +64,53 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   logger.info(
     `[cocos-sdk] Installed native bridge (${gradleFiles.length} Android, ${podfiles.length} iOS project files).`,
   );
+}
+
+function patchReplayFileBridge(file, header) {
+  const original = fs.readFileSync(file, 'utf8');
+  const includeBegin = '// COCOS_SDK_REPLAY_INCLUDE_BEGIN';
+  const includeEnd = '// COCOS_SDK_REPLAY_INCLUDE_END';
+  const initBegin = '// COCOS_SDK_REPLAY_INIT_BEGIN';
+  const initEnd = '// COCOS_SDK_REPLAY_INIT_END';
+  // Creator 3 shares Game.cpp across iOS/Android builds. Keep its include stable
+  // when another platform's build directory is cleaned or regenerated.
+  const sharedDirectory = path.join(path.dirname(file), 'cocos-sdk-replay');
+  const include = `${includeBegin}\n#include "cocos-sdk-replay/FTReplayFileBridge.h"\n${includeEnd}`;
+  const init = `${initBegin}\n    ft_cocos::installReplayFileBridge();\n    ${initEnd}\n    `;
+  let next = original;
+  if (markedPattern(initBegin, initEnd).test(next)) {
+    next = next.replace(markedPattern(initBegin, initEnd), init.trimEnd());
+  } else {
+    const anchor = path.basename(file) === 'Game.cpp'
+      ? /\b(?:return\s+)?BaseGame::init\(\);/
+      : /\b(?:return\s+)?se->start\(\);/;
+    if (!anchor.test(next)) return;
+    next = next.replace(anchor, (value) => init + value);
+  }
+  next = markedPattern(includeBegin, includeEnd).test(next)
+    ? next.replace(markedPattern(includeBegin, includeEnd), include)
+    : `${include}\n${next}`;
+  copyDirectory(path.dirname(header), sharedDirectory);
+  if (next !== original) fs.writeFileSync(file, next);
+}
+
+function findReplayEntryFiles(files) {
+  const entries = files.filter((file) => ['AppDelegate.cpp', 'Game.cpp'].includes(path.basename(file)));
+  for (const file of files) {
+    let nativeDirectory;
+    if (path.basename(file) === 'gradle.properties') {
+      const value = readProperty(fs.readFileSync(file, 'utf8'), 'NATIVE_DIR');
+      if (value) nativeDirectory = path.resolve(path.dirname(file), value);
+    } else if (path.basename(file) === 'CMakeCache.txt') {
+      const match = fs.readFileSync(file, 'utf8').match(/^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$/m);
+      if (match) nativeDirectory = match[1].trim();
+    }
+    if (nativeDirectory) {
+      const game = path.resolve(nativeDirectory, '..', 'common', 'Classes', 'Game.cpp');
+      if (fs.existsSync(game)) entries.push(game);
+    }
+  }
+  return uniqueFiles(entries);
 }
 
 function patchCocos2IosConfiguration(projectFile, target) {
@@ -202,7 +254,7 @@ function patchGradle(file, nativeRoot) {
     'dependencies {',
     "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-sdk:1.7.6-alpha02'",
     "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-native:1.1.3'",
-    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-session-replay:0.1.9-alpha02'",
+    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-session-replay:0.1.9-alpha03'",
     "    implementation 'com.google.code.gson:gson:2.10.1'",
     "    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')",
     "    implementation 'androidx.appcompat:appcompat:1.1.0'",

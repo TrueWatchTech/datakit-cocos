@@ -9,6 +9,7 @@ export interface FTTransportResponse<T = FTValue> {
 export interface FTNativeTransport {
   readonly platform: 'android' | 'ios' | 'unsupported';
   invoke<T = FTValue>(method: string, payload?: unknown): T | undefined;
+  invokeAsync?<T = FTValue>(method: string, payload?: unknown): Promise<T | undefined>;
 }
 
 export class FTNoopTransport implements FTNativeTransport {

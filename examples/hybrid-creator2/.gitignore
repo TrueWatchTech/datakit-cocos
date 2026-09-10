@@ -8,3 +8,6 @@
 /native-host/android/HybridSampleEnvironment.java
 /native-host/ios/HybridSampleEnvironment.generated.h
 *.log
+
+# Installed by npm run sdk:install; preserve generated .meta files on reinstall.
+/assets/truewatch-cocos-sdk/

@@ -1,4 +1,5 @@
 #import "FTCocosBridge.h"
+#import "FTCocosReplayImageJobs.h"
 
 #import "FTMobileSDK.h"
 #import "FTSessionReplay.h"
@@ -24,6 +25,10 @@
 }
 
 + (id)dispatch:(NSString *)method arguments:(NSDictionary *)arguments {
+    if ([method isEqualToString:@"replay.beginSaveImage"]) return [self beginSaveImage:arguments];
+    if ([method isEqualToString:@"replay.pollSaveImage"]) {
+        return [FTCocosReplayImageJobs poll:[self requiredText:arguments key:@"job"]];
+    }
     FTExternalDataManager *rum = [FTExternalDataManager sharedManager];
     if ([method isEqualToString:@"hybrid.attach"]) {
         [self ensureNativeHostInitialized];
@@ -252,6 +257,18 @@
     if ([method isEqualToString:@"replay.stop"]) return nil;
     [self fail:[NSString stringWithFormat:@"Unknown bridge method: %@", method]];
     return nil;
+}
+
++ (NSString *)beginSaveImage:(NSDictionary *)arguments {
+    NSString *method = [self requiredText:arguments key:@"method"];
+    if (![method isEqualToString:@"replay.saveImage"] && ![method isEqualToString:@"replay.saveImageV2"]) {
+        [self fail:@"Unsupported asynchronous Replay method"];
+    }
+    NSDictionary *payload = [[self dictionary:arguments[@"arguments"]] copy];
+    if (!payload) [self fail:@"Replay image arguments are required"];
+    return [FTCocosReplayImageJobs beginWithWork:^NSString *{
+        return [self responseWithValue:[self dispatch:method arguments:payload] error:nil];
+    }];
 }
 
 + (void)ensureNativeHostInitialized {

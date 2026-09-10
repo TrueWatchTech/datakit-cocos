@@ -1,6 +1,6 @@
 {
   "name": "@truewatchtech/cocos-sdk",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "Observability SDK integration for Cocos Creator 2.4 and 3.x",
   "license": "Apache-2.0",
   "author": "TrueWatch",
@@ -37,6 +37,7 @@
     "creator2",
     "creator3",
     "dist",
+    "components",
     "extensions",
     "native",
     "bin",

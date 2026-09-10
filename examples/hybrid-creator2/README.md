@@ -82,9 +82,25 @@ seconds and tap each button:
 - `RUM + Log`: one Action and one RUM-linked custom Log
 - `RUM Error`: one Error and one error-level linked Log
 - `Replay change`: a visible color delta for Session Replay; tap several times
-- `PRIVATE TOKEN / MASK-ME-8391`: visible on the live Cocos page, but replaced by a gray rectangle in Session Replay
+- `COMPONENT-3141`: a node with `ReplayPrivacy` in its default Mask mode; gray in Replay
+- `HIDE-ME-2718`: a node with `ReplayPrivacy` in Hide mode; black in Replay
+- `MASK-ME-8391`: a node protected through `setPrivacy(node, 'mask')`; gray in Replay
+- `Mask: move + scale`: translates the probe group and scales it to 85%; tap again to restore
 - `Mask: toggle 2D/3D`: switches the capture camera between 2D and 3D mode; verify the private token stays fully gray in Replay after each change, while nearby public content remains visible
 - `Native page`: leaves Cocos and returns RUM View/Replay ownership to native UI
+
+### Privacy visual acceptance
+
+`npm run setup` installs the `ReplayPrivacy` component script used by this sample. The two component probes attach that script at runtime, demonstrating the same component rules used by scene and prefab nodes; the third probe uses the code API.
+
+Compare the live page with its Replay at each layout/camera setting:
+
+1. The three red rectangular targets and their synthetic tokens are visible on the live page.
+2. Only those targets become gray / black / gray in Replay. All token text must disappear.
+3. All twelve green guard strips, the two **KEEP ME** labels, the public caption, and surrounding buttons remain visible and unchanged. Each guard is a sibling, separated from the target by a two-unit gap.
+4. Repeat after **Mask: move + scale**, then after the camera/fit toggle, and with both changes combined. Check all four edges of each target for leakage or spill. Capture resolution can round a projected boundary outward by less than one pixel.
+
+The targets deliberately have square corners and labels inside their bounds. Replay currently masks projected rectangles; this example verifies rectangular control bounds, not a per-pixel silhouette for rounded or rotated graphics, or independent visibility of overlapping controls.
 
 The native View is `HybridNativeAndroidHome`; after opening Cocos, the active
 View becomes `CocosHybridCreator2Sample`. Every event also includes

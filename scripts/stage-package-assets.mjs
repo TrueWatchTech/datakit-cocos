@@ -18,6 +18,7 @@ await Promise.all([
   stageExtension('creator3'),
   cp('native', `${packageRoot}/native`, { recursive: true, filter: stageFilter }),
   cp('installer/cli.cjs', `${packageRoot}/bin/cli.cjs`),
+  cp('components', `${packageRoot}/components`, { recursive: true, filter: stageFilter }),
   cp('LICENSE', `${packageRoot}/LICENSE`),
   cp('THIRD_PARTY_NOTICES', `${packageRoot}/THIRD_PARTY_NOTICES`),
 ]);
