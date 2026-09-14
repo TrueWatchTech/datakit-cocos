@@ -1,8 +1,9 @@
+import { composeSessionReplay } from '../src/session-replay/core/client';
 import { describe, expect, it, vi } from 'vitest';
 import { FTDefaultAutoTracking, type FTEngineTrackingHooks } from '../src/core/auto-tracking';
 import { FTCocosSDK, type FTAutoTrackingController } from '../src/core/client';
 import { FTLogger, FTMobileAgent, FTRUM, FTTrace } from '../src/core/modules';
-import { encodeReplayImageRecord } from '../src/core/replay-encoding';
+import { encodeReplayImageRecord } from '../src/session-replay/core/replay-encoding';
 import {
   FTSessionReplay,
   applyPrivacyRegions,
@@ -13,9 +14,10 @@ import {
   type FTCanvasCapture,
   type FTReplayPointerEvent,
   type FTReplayPointerSource,
-} from '../src/core/replay';
+} from '../src/session-replay/core/replay';
 import { parseTransportResponse, type FTNativeTransport } from '../src/core/transport';
-import type { FTAutoTrackingConfig, FTCapturedFrame, FTStoredFrame } from '../src/core/types';
+import type { FTAutoTrackingConfig } from '../src/core/types';
+import type { FTCapturedFrame, FTStoredFrame } from '../src/session-replay/core/types';
 
 class RecordingTransport implements FTNativeTransport {
   readonly platform = 'android' as const;
@@ -23,6 +25,7 @@ class RecordingTransport implements FTNativeTransport {
 
   invoke<T>(method: string, payload?: unknown): T | undefined {
     this.calls.push({ method, payload });
+    if (method === 'replay.capabilities') return { protocol: 1 } as T;
     if (method === 'replay.getContext') {
       return {
         application_id: 'app-id',
@@ -36,6 +39,7 @@ class RecordingTransport implements FTNativeTransport {
 }
 
 class StaticCapture implements FTCanvasCapture {
+  setCamera(): void {}
   captures = 0;
   disposed = 0;
   readonly rgba = new Uint8Array([
@@ -126,7 +130,7 @@ describe('core bridge API', () => {
       method: 'sdk.configure',
       payload: {
         datakitUrl: 'http://127.0.0.1:9529',
-        globalContext: { sdk_package_cocos: '0.1.0-alpha.4' },
+        globalContext: { sdk_package_cocos: '0.1.0-alpha.7' },
       },
     });
   });
@@ -155,7 +159,7 @@ describe('core bridge API', () => {
     expect(attributes).toEqual({ feature: 'checkout' });
     transport.calls.forEach((call) => {
       expect((call.payload as { attributes: Record<string, string> }).attributes)
-        .toMatchObject({ sdk_bridge_info: '{"cocos":"0.1.0-alpha.4"}' });
+        .toMatchObject({ sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' });
     });
     expect((transport.calls[0]?.payload as { attributes: Record<string, string> }).attributes)
       .toMatchObject({ feature: 'checkout' });
@@ -177,11 +181,17 @@ describe('core bridge API', () => {
   });
 });
 
+function createTestSDK(transport: FTNativeTransport, capture: StaticCapture, autoTracking?: FTAutoTrackingController) {
+  return composeSessionReplay(new FTCocosSDK(transport, autoTracking), 'creator3', () => ({
+    transport, capture, pointers: new RecordingPointerSource(),
+  }));
+}
+
 describe('native host hybrid lifecycle', () => {
   it('attaches to the native-owned SDK without sending initialization configuration', () => {
     const transport = new RecordingTransport();
     const autoTracking = new RecordingAutoTracking();
-    const sdk = new FTCocosSDK(transport, new StaticCapture(), autoTracking);
+    const sdk = createTestSDK(transport, new StaticCapture(), autoTracking);
 
     sdk.attach({ autoTrack: { scenes: false, actions: true } });
     sdk.attach({ autoTrack: { scenes: true } });
@@ -193,7 +203,7 @@ describe('native host hybrid lifecycle', () => {
     expect(transport.calls).toEqual([
       {
         method: 'hybrid.attach',
-        payload: { requiresReplay: false, sdkVersion: '0.1.0-alpha.4' },
+        payload: { sdkVersion: '0.1.0-alpha.7' },
       },
     ]);
     expect(autoTracking.starts).toEqual([
@@ -220,7 +230,7 @@ describe('native host hybrid lifecycle', () => {
         method: 'rum.startView',
         payload: {
           name: 'InitialCocosView',
-          attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.4"}' },
+          attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' },
         },
       },
     ]);
@@ -230,25 +240,25 @@ describe('native host hybrid lifecycle', () => {
     expect(transport.calls.slice(1)).toEqual([
       {
         method: 'rum.stopView',
-        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.4"}' } },
+        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' } },
       },
       {
         method: 'rum.startView',
         payload: {
           name: 'NextScene',
-          attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.4"}' },
+          attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' },
         },
       },
       {
         method: 'rum.stopView',
-        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.4"}' } },
+        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' } },
       },
     ]);
   });
 
   it('switches the native recorder only while the Cocos page is active', () => {
     const transport = new RecordingTransport();
-    const sdk = new FTCocosSDK(transport, new StaticCapture(), new RecordingAutoTracking());
+    const sdk = createTestSDK(transport, new StaticCapture(), new RecordingAutoTracking());
 
     sdk.attach({
       replay: { captureFps: 2, maxImageDimension: 720 },
@@ -257,10 +267,10 @@ describe('native host hybrid lifecycle', () => {
     sdk.enterCocos({ viewName: 'Game' });
     sdk.leaveCocos();
 
-    expect(transport.calls.slice(0, 3)).toEqual([
+    expect(transport.calls.filter(call => call.method !== 'replay.capabilities').slice(0, 3)).toEqual([
       {
         method: 'hybrid.attach',
-        payload: { requiresReplay: true, sdkVersion: '0.1.0-alpha.4' },
+        payload: { sdkVersion: '0.1.0-alpha.7' },
       },
       { method: 'hybrid.setExternalRecorderActive', payload: { active: true } },
       { method: 'hybrid.setExternalRecorderActive', payload: { active: false } },
@@ -268,7 +278,7 @@ describe('native host hybrid lifecycle', () => {
   });
 
   it('keeps standalone initialization and native-host attachment mutually exclusive', () => {
-    const standalone = new FTCocosSDK(
+    const standalone = createTestSDK(
       new RecordingTransport(),
       new StaticCapture(),
       new RecordingAutoTracking(),
@@ -277,7 +287,7 @@ describe('native host hybrid lifecycle', () => {
     expect(() => standalone.attach()).toThrow(/mutually exclusive/);
 
     const hybridTransport = new RecordingTransport();
-    const hybrid = new FTCocosSDK(
+    const hybrid = createTestSDK(
       hybridTransport,
       new StaticCapture(),
       new RecordingAutoTracking(),
@@ -297,7 +307,7 @@ describe('native host hybrid lifecycle', () => {
   });
 
   it('requires an explicit initial view when scene tracking is disabled', () => {
-    const sdk = new FTCocosSDK(
+    const sdk = createTestSDK(
       new RecordingTransport(),
       new StaticCapture(),
       new RecordingAutoTracking(),
@@ -402,7 +412,7 @@ describe('session replay', () => {
     });
   });
 
-  it('probes an unsupported V2 bridge once and keeps using V1', async () => {
+  it('reports an unsupported V2 bridge without bypassing the explicit image limit', async () => {
     class LegacyTransport extends RecordingTransport {
       v2Attempts = 0;
 
@@ -424,13 +434,18 @@ describe('session replay', () => {
     const transport = new LegacyTransport();
     const replay = new FTSessionReplay(transport, new ChangingCapture());
 
-    replay.start({ imagePolicy: {} });
-    await expect(replay.captureNow()).resolves.toBe(true);
-    await expect(replay.captureNow()).resolves.toBe(true);
-    replay.stop();
-
-    expect(transport.v2Attempts).toBe(1);
-    expect(transport.calls.filter((call) => call.method === 'replay.saveImage')).toHaveLength(2);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      replay.start({ imagePolicy: { maxFrameBytes: 4096 } });
+      await expect(replay.captureNow()).resolves.toBe(false);
+      await expect(replay.captureNow()).resolves.toBe(false);
+      expect(error.mock.calls[0]?.[1]).toMatchObject({ message: expect.stringContaining('requires replay.saveImageV2') });
+      expect(transport.v2Attempts).toBe(1);
+      expect(transport.calls.filter((call) => call.method === 'replay.saveImage')).toHaveLength(0);
+    } finally {
+      replay.stop();
+      error.mockRestore();
+    }
   });
 
   it('drops one failed frame without disabling the next capture', async () => {
@@ -512,34 +527,34 @@ describe('session replay', () => {
     expect(pointers).toMatchObject({ starts: 1, stops: 1 });
   });
 
-  it('skips GPU capture when the rolling budget is full but still writes pointers', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000);
-    const transport = new RecordingTransport();
+  it('keeps writing pointers when the native encoder rejects a frame', async () => {
+    class RejectingTransport extends RecordingTransport {
+      images = 0;
+      override invoke<T>(method: string, payload?: unknown): T | undefined {
+        if (method === 'replay.saveImageV2') {
+          return (++this.images === 1
+            ? { resourceId: 'image', width: 2, height: 2, byteSize: 100 }
+            : { accepted: false }) as T;
+        }
+        return super.invoke<T>(method, payload);
+      }
+    }
+    const transport = new RejectingTransport();
     const capture = new StaticCapture();
     const pointers = new RecordingPointerSource();
     const replay = new FTSessionReplay(transport, capture, pointers);
     try {
-      replay.start({
-        touchPrivacy: 'show',
-        imagePolicy: { maxFrameBytes: 1024, maxBytesPerMinute: 16 * 1024 },
-      });
+      replay.start({ touchPrivacy: 'show', imagePolicy: { maxFrameBytes: 1024 } });
       await expect(replay.captureNow()).resolves.toBe(true);
-      pointers.emit({
-        eventType: 'move',
-        pointerId: 1,
-        normalizedX: 0.5,
-        normalizedY: 0.5,
-        timestamp: 1_100,
-      });
+      capture.rgba.fill(0);
+      pointers.emit({ eventType: 'move', pointerId: 1, normalizedX: 0.5, normalizedY: 0.5, timestamp: 1_100 });
       await expect(replay.captureNow()).resolves.toBe(true);
-
-      expect(capture.captures).toBe(1);
+      expect(capture.captures).toBe(2);
+      expect(transport.images).toBe(2);
       const segments = transport.calls.filter((call) => call.method === 'replay.writeSegment');
       expect(JSON.parse((segments[1]?.payload as { segment: string }).segment).records[0].type).toBe(11);
     } finally {
       replay.stop();
-      vi.useRealTimers();
     }
   });
 

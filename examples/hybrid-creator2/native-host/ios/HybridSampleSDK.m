@@ -1,9 +1,21 @@
 #import "HybridSampleSDK.h"
 #import "HybridSampleEnvironment.generated.h"
 
+#if __has_include("FTMobileSDK.h")
 #import <TrueWatchSDK/TrueWatchSDK.h>
 #import <TrueWatchSDK/TrueWatchSessionReplay.h>
+#else
+#import "FTMobileAgent.h"
+#import "FTSDKConfig.h"
+#import "FTRumConfig.h"
+#import "FTLoggerConfig.h"
+#import "FTMobileConfig.h"
+#import "FTSessionReplay.h"
+#endif
 
+// Opt in with the Xcode launch arguments: -SampleURLConnection YES.
+// Keep this off when JS also tracks requests backed by NSURLConnection.
+static BOOL FTHybridSampleURLConnectionEnabled;
 static BOOL FTHybridNativePageVisible = YES;
 static __weak UIViewController *FTHybridNativePageController;
 
@@ -31,7 +43,9 @@ static __weak UIViewController *FTHybridNativePageController;
     actions.spacing = 16;
     actions.distribution = UIStackViewDistributionFillEqually;
 
-    self.statusLabel = [self label:@"Native page active · NSURLSession automatic telemetry enabled"
+    self.statusLabel = [self label:FTHybridSampleURLConnectionEnabled
+                                      ? @"Native page active · NSURLConnection automatic telemetry enabled"
+                                      : @"Native page active · NSURLSession automatic telemetry enabled"
                                   size:17
                                  color:[UIColor colorWithRed:44.0 / 255.0 green:202.0 / 255.0 blue:178.0 / 255.0 alpha:1]];
     self.statusLabel.backgroundColor = [UIColor colorWithRed:27.0 / 255.0 green:39.0 / 255.0 blue:64.0 / 255.0 alpha:1];
@@ -79,6 +93,10 @@ static __weak UIViewController *FTHybridNativePageController;
 }
 
 - (void)sendNativeRequest {
+    if (FTHybridSampleURLConnectionEnabled) {
+        [self sendNativeURLConnectionRequest];
+        return;
+    }
     self.statusLabel.text = @"Native NSURLSession request in progress…";
     NSString *url = [NSString stringWithFormat:
                      @"https://httpbin.org/get?sample=cocos-hybrid-creator2&layer=native-auto&request_id=%.0f",
@@ -98,11 +116,35 @@ static __weak UIViewController *FTHybridNativePageController;
     [task resume];
 }
 
+// Deliberately use the legacy API to verify the SDK's NSURLConnection instrumentation.
+- (void)sendNativeURLConnectionRequest {
+    self.statusLabel.text = @"Native NSURLConnection request in progress…";
+    NSString *url = [NSString stringWithFormat:
+                     @"https://httpbin.org/get?sample=cocos-hybrid-creator2&layer=native-urlconnection&request_id=%@",
+                     NSUUID.UUID.UUIDString];
+    NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:url]
+                                           cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                       timeoutInterval:12];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [NSURLConnection sendAsynchronousRequest:request queue:NSOperationQueue.mainQueue
+                          completionHandler:^(NSURLResponse *response, __unused NSData *data, NSError *error) {
+        if (error) {
+            self.statusLabel.text = [NSString stringWithFormat:@"NSURLConnection failed: %@", error.localizedDescription];
+            return;
+        }
+        self.statusLabel.text = [NSString stringWithFormat:@"NSURLConnection completed (%ld) · inspect RUM Resource",
+                                 (long)[(NSHTTPURLResponse *)response statusCode]];
+    }];
+#pragma clang diagnostic pop
+}
+
 @end
 
 @implementation HybridSampleSDK
 
 + (void)start {
+    FTHybridSampleURLConnectionEnabled = [[NSUserDefaults standardUserDefaults] boolForKey:@"SampleURLConnection"];
     NSCAssert(FTHybridSampleIOSRumAppID.length > 0,
               @"Set SAMPLE_IOS_APP_ID before building the iOS sample");
 
@@ -125,6 +167,7 @@ static __weak UIViewController *FTHybridNativePageController;
     rumConfig.enableTraceUserAction = YES;
     rumConfig.enableTraceUserView = YES;
     rumConfig.enableTraceUserResource = YES;
+    rumConfig.enableTraceURLConnectionResource = FTHybridSampleURLConnectionEnabled;
     rumConfig.enableTrackAppCrash = YES;
     [rumConfig setEnableTrackAppFreeze:YES freezeDurationMs:100];
     [[FTMobileAgent sharedInstance] startRumWithConfigOptions:rumConfig];
@@ -140,6 +183,7 @@ static __weak UIViewController *FTHybridNativePageController;
     traceConfig.sampleRate = 100;
     traceConfig.networkTraceType = FTNetworkTraceTypeDDtrace;
     traceConfig.enableLinkRumData = YES;
+    traceConfig.enableAutoTraceURLConnection = FTHybridSampleURLConnectionEnabled;
     [[FTMobileAgent sharedInstance] startTraceWithConfigOptions:traceConfig];
 
     // Keep native recording enabled by default. enterCocos()/leaveCocos() switch

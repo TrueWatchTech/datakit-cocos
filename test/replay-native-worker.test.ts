@@ -21,7 +21,7 @@ it.skipIf(process.platform !== 'darwin')('runs iOS image jobs off the main threa
   try {
     const binary = join(root, 'image-test');
     execFileSync('clang', ['-fobjc-arc', '-framework', 'Foundation',
-      resolve('test/native/replay-image-jobs.m'), resolve('native/ios/FTCocosReplayImageJobs.m'), '-o', binary],
+      resolve('test/native/replay-image-jobs.m'), resolve('src/session-replay/native/ios/FTCocosReplayImageJobs.m'), '-o', binary],
     { maxBuffer: 100_000, timeout: 30_000 });
     execFileSync(binary, [], { maxBuffer: 10_000, timeout: 10_000 });
   } finally {

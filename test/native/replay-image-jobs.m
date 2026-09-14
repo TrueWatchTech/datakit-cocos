@@ -1,4 +1,4 @@
-#import "../../native/ios/FTCocosReplayImageJobs.h"
+#import "../../src/session-replay/native/ios/FTCocosReplayImageJobs.h"
 #include <assert.h>
 
 static NSDictionary *waitForJob(NSString *identifier) {

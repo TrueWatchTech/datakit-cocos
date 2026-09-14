@@ -6,13 +6,23 @@ import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as creator3Engine from 'cc';
-import { FTCreator2CanvasCapture } from '../src/creator2/capture';
-import { FTCreator3CanvasCapture } from '../src/creator3/capture';
-import { applyPrivacyRegions } from '../src/core/replay';
+import { FTCreator2CanvasCapture } from '../src/session-replay/creator2/capture';
+import { FTCreator3CanvasCapture } from '../src/session-replay/creator3/capture';
+import { applyPrivacyRegions } from '../src/session-replay/core/replay';
 
 const state = vi.hoisted(() => ({ scene: undefined as any }));
 vi.mock('cc', () => ({
-  Camera: class { static ClearFlags = { COLOR: 1 }; },
+  Camera: class { static ClearFlags = { COLOR: 1 }; static ClearFlag = { SOLID_COLOR: 7 }; },
+  Node: class {
+    active = false;
+    parent: any;
+    get scene() { return this.parent?.scene; }
+    addComponent() {
+      return { enabled: false, node: this, worldToScreen: (point: unknown) => state.scene.getComponentInChildren().worldToScreen(point) };
+    }
+    destroy(): void {}
+  },
+  isValid: (value: any) => !!value && value.isValid !== false,
   Component: class { enabledInHierarchy = true; isValid = true; },
   EditBox: class {},
   UITransform: class {},
@@ -35,6 +45,7 @@ vi.mock('cc', () => ({
   director: {
     getScene: () => state.scene,
     once: (_event: string, callback: () => void) => callback(),
+    off(): void {},
   },
   view: { getVisibleSizeInPixel: () => ({ width: 10, height: 10 }) },
   visibleRect: { width: 10, height: 10 },
@@ -45,7 +56,7 @@ vi.mock('cc', () => ({
 
 // Execute the actual distributed asset scripts, including their enum and getter.
 function loadComponent(creator: number): any {
-  const source = readFileSync(`components/creator${creator}/ReplayPrivacy.ts`, 'utf8');
+  const source = readFileSync(`src/session-replay/components/creator${creator}/ReplayPrivacy.ts`, 'utf8');
   const compiled = ts.transpileModule(source, {
     compilerOptions: {
       target: ts.ScriptTarget.ES2018,
@@ -83,6 +94,9 @@ describe.each([2, 3])('Creator %s ReplayPrivacy component', (creator) => {
     components = [component];
     editBoxes = [];
     const camera = {
+      enabledInHierarchy: true,
+      node: { get scene() { return state.scene; } },
+      rect: { clone: () => ({ x: 0, y: 0, width: 1, height: 1 }) },
       clearFlags: 0,
       targetTexture: undefined,
       getWorldToScreenPoint: (point: unknown) => point,
@@ -91,6 +105,7 @@ describe.each([2, 3])('Creator %s ReplayPrivacy component', (creator) => {
     state.scene = {
       getComponentInChildren: () => camera,
       getComponentsInChildren: (type: unknown) => {
+        if (type === creator3Engine.Camera) return [camera];
         if (type === 'ReplayPrivacy') return components;
         if (type === creator3Engine.EditBox) return editBoxes;
         throw new Error('Unexpected component query');
@@ -98,6 +113,8 @@ describe.each([2, 3])('Creator %s ReplayPrivacy component', (creator) => {
     };
     capture = creator === 2 ? new FTCreator2CanvasCapture() : new FTCreator3CanvasCapture();
   });
+
+  afterEach(() => { if (capture instanceof FTCreator3CanvasCapture) capture.dispose(); });
 
   async function expectMode(mode?: 'mask' | 'hide') {
     const frame = (await capture.capture(10))!;

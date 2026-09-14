@@ -1,6 +1,6 @@
 {
   "name": "cocos-sdk-workspace",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.7",
   "description": "Observability SDK integration workspace for Cocos Creator",
   "private": true,
   "license": "Apache-2.0",
@@ -17,18 +17,25 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run clean && npm run build:creator2 && npm run build:creator3 && node scripts/stage-package-assets.mjs",
+    "build": "npm run clean && npm run build:creator2 && npm run build:creator3 && npm run build:replay:creator2 && npm run build:replay:creator3 && node scripts/stage-package-assets.mjs",
     "build:creator2": "tsc -p tsconfig.creator2.json",
     "build:creator3": "tsc -p tsconfig.creator3.json",
     "clean": "node scripts/clean.mjs",
     "test": "vitest run",
+    "test:android-alignment": "python3 test/android-page-alignment.test.py",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.tests.json --noEmit",
     "sample:configure": "node scripts/configure-sample.mjs",
     "pack": "npm run build && node scripts/pack.mjs",
+    "test:release-policy": "node --test scripts/test-release-policy.cjs",
+    "build:replay:creator2": "tsc -p tsconfig.replay-creator2.json",
+    "build:replay:creator3": "tsc -p tsconfig.replay-creator3.json",
+    "test:publish-token": "node --test scripts/test-publish-npm-token.mjs",
+    "test:packed": "node scripts/test-packed-packages.mjs",
+    "test:published": "node scripts/test-packed-packages.mjs --published",
+    "samples:sync": "node scripts/sync-sample-game.mjs",
     "verify:release": "node scripts/verify-release.mjs",
-    "verify": "npm run verify:release && npm run typecheck && npm test && npm run test:release-policy && npm run build",
-    "test:release-policy": "node --test scripts/test-release-policy.cjs scripts/test-publish-preflight.mjs"
+    "verify": "npm run verify:release && node scripts/publish-npm-token.mjs --check && npm run typecheck && npm test && npm run test:release-policy && npm run test:publish-token && npm run build && npm run test:packed"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

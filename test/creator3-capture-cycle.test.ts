@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { waitForRenderTextureReadback } from '../src/creator3/replay-render-cycle';
+import { waitForRenderTextureReadback } from '../src/session-replay/creator3/replay-render-cycle';
 
 describe('Creator 3 replay RenderTexture readback', () => {
   it('keeps the target attached for two complete draw cycles', async () => {

@@ -3,6 +3,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { createRequire } = require('module');
+const { syncManagedDirectory } = require('./managed-assets.cjs');
 
 const packageRoot = path.resolve(__dirname, '..');
 const metadata = require(path.join(packageRoot, 'package.json'));
@@ -27,15 +29,51 @@ const creatorMajor = resolveCreatorMajor(projectRoot, readOption(rawArguments, '
 const container = creatorMajor === 2 ? 'packages' : 'extensions';
 const destination = path.join(projectRoot, container, 'truewatch-cocos-sdk');
 const extensionSource = path.join(packageRoot, 'extensions', `creator${creatorMajor}`);
-
-copyDirectory(extensionSource, destination);
-copyDirectory(path.join(packageRoot, 'native'), path.join(destination, 'native'));
+const manager = readOption(rawArguments, '--ios-dependency-manager');
+if (manager !== undefined && !['spm', 'cocoapods'].includes(manager)) {
+  fail('Invalid --ios-dependency-manager. Expected spm or cocoapods.');
+}
+const configFile = path.join(projectRoot, 'cocos-sdk.config.json');
+const config = readJson(configFile) || {};
+if (rawArguments.includes('--replay') && rawArguments.includes('--no-replay')) fail('Choose either --replay or --no-replay.');
+const replayEnabled = rawArguments.includes('--replay') ? true
+  : rawArguments.includes('--no-replay') ? false : config.replay?.enabled === true;
+let replayRoot;
+let replayDescriptor;
+if (replayEnabled) {
+  try {
+    const projectRequire = createRequire(path.join(projectRoot, 'package.json'));
+    replayRoot = path.dirname(projectRequire.resolve('@truewatchtech/cocos-session-replay/package.json'));
+  } catch {
+    fail('Session Replay is not installed. Install @truewatchtech/cocos-session-replay at the same version as @truewatchtech/cocos-sdk, then rerun with --replay.');
+  }
+  const replayPackage = readJson(path.join(replayRoot, 'package.json'));
+  replayDescriptor = readJson(path.join(replayRoot, 'native-integration.json'));
+  if (replayPackage.version !== metadata.version || replayPackage.peerDependencies?.[metadata.name] !== metadata.version
+    || replayDescriptor?.schemaVersion !== 1 || replayDescriptor?.version !== metadata.version || replayDescriptor?.baseVersion !== metadata.version) {
+    fail('Replay package and native integration must exactly match the base SDK version.');
+  }
+}
+const sources = [{ root: extensionSource }, { root: path.join(packageRoot, 'native'), prefix: 'native/' }];
+if (replayRoot) sources.push({ root: path.join(replayRoot, 'native'), prefix: 'replay-native/' });
+const generated = {
+  'sdk-integration.json': JSON.stringify({ schemaVersion: 1, version: metadata.version, replay: replayEnabled }, null, 2) + '\n',
+};
+if (replayDescriptor) generated['replay-integration.json'] = JSON.stringify(replayDescriptor, null, 2) + '\n';
+syncManagedDirectory(destination, sources, generated);
 const componentDestination = path.join(projectRoot, 'assets', 'truewatch-cocos-sdk');
-copyDirectory(path.join(packageRoot, 'components', `creator${creatorMajor}`), componentDestination);
-
+if (replayRoot) syncManagedDirectory(componentDestination, [{ root: path.join(replayRoot, 'components', `creator${creatorMajor}`) }]);
+// Keep existing component scripts and .meta files when disabling Replay: scenes may reference them.
+if (manager !== undefined) config.ios = { ...config.ios, dependencyManager: manager };
+if (rawArguments.includes('--replay') || rawArguments.includes('--no-replay') || config.replay) {
+  config.replay = { ...config.replay, enabled: replayEnabled };
+}
+if (manager !== undefined || rawArguments.includes('--replay') || rawArguments.includes('--no-replay')) {
+  fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`);
+}
 process.stdout.write(
-  `Installed ${metadata.name} for Cocos Creator ${creatorMajor} at ${destination}\n`
-  + `Installed ReplayPrivacy at ${componentDestination}. Add it through Session Replay/ReplayPrivacy in the component menu.\n`
+  `Installed ${metadata.name} for Cocos Creator ${creatorMajor} at ${destination} (Replay: ${replayEnabled ? 'enabled' : 'disabled'})\n`
+  + (replayEnabled ? `Installed ReplayPrivacy at ${componentDestination}. Add it through Session Replay/ReplayPrivacy in the component menu.\n` : '')
   + 'Re-open Cocos Creator, enable the truewatch-cocos-sdk extension, and rebuild the native project.\n',
 );
 for (const duplicate of findDuplicateExtensions(path.join(projectRoot, container), destination)) {
@@ -109,17 +147,6 @@ function readOption(argumentsList, name) {
   return inline ? inline.slice(prefix.length) : undefined;
 }
 
-function copyDirectory(source, destinationPath) {
-  if (!fs.existsSync(source)) fail(`Missing package asset: ${source}`);
-  fs.mkdirSync(destinationPath, { recursive: true });
-  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-    const from = path.join(source, entry.name);
-    const to = path.join(destinationPath, entry.name);
-    if (entry.isDirectory()) copyDirectory(from, to);
-    else fs.copyFileSync(from, to);
-  }
-}
-
 function printHelp() {
   process.stdout.write([
     'Usage: npx @truewatchtech/cocos-sdk install [options]',
@@ -127,6 +154,9 @@ function printHelp() {
     'Options:',
     '  --project <path>  Cocos project root (defaults to the current directory)',
     '  --creator <2|3>   Override automatic Cocos Creator version detection',
+    '  --replay         Include the separately installed Session Replay package',
+    '  --no-replay      Remove SDK-managed Replay native integration on rebuild',
+    '  --ios-dependency-manager <spm|cocoapods>  Save the iOS dependency manager in cocos-sdk.config.json',
     '  -h, --help        Show this help',
     '',
   ].join('\n'));

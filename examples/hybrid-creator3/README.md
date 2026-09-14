@@ -67,7 +67,7 @@ tracking normally inserted by `ft-plugin`. It also keeps an idempotent
 `HybridSampleSdk.start()` fallback in `AppActivity.onCreate`. On iOS it adds
 `[HybridSampleSDK start]` to `didFinishLaunchingWithOptions`. For Creator 3
 Android it makes `HybridSampleNativeActivity` the launcher, applies
-`ft-plugin:1.3.8`, and adds the OkHttp dependency used by the native automatic
+`ft-plugin:1.3.9-alpha01`, and adds the OkHttp dependency used by the native automatic
 network button. The native client deliberately uses
 `OkHttpClient.Builder().build()` so the plugin can inject Resource and Trace
 interceptors.
@@ -80,55 +80,74 @@ run `pod install` once more before rebuilding; CMake regeneration overwrites
 CocoaPods' project integration. A physical device avoids Cocos 3.8.8
 engine-library architecture limitations that can affect arm64 simulators.
 
+For Android 16 KB page-size support, `native:install` also adds
+`-Wl,-z,max-page-size=16384` and `-Wl,-z,common-page-size=16384` to the
+`libcocos.so` CMake target. Rebuild the native library after installation; replacing
+only the exported game assets does not update ELF alignment. This does not change
+the SDK initialization API. Check the finished APK from the workspace root:
+
+```bash
+python3 scripts/check-android-page-alignment.py /path/to/app-debug.apk
+```
+
+The check covers every packaged `.so`, LOAD alignment, GNU_RELRO boundaries, and
+16 KB ZIP alignment for uncompressed libraries. Keep the sample's compressed
+native-library packaging enabled, or use AGP 8.5.1+ for uncompressed packaging.
+Any additional prebuilt `.so` must independently pass this check. Also run the app
+on a 16 KB device/emulator (`adb shell getconf PAGE_SIZE` must print `16384`);
+static alignment alone cannot verify runtime page-size assumptions. See the
+[Android page-size guide](https://developer.android.com/guide/practices/page-sizes).
+
 With Xcode 26, Cocos 3.8.8's bundled Enoki source may fail with
 `invalid-specialization`. Add `-Wno-invalid-specialization` to **Other C++
 Flags** for the generated Cocos targets (or use the equivalent command-line
 override). This compatibility flag concerns the Creator engine, not the monitoring
 SDK; the sample's iOS host and complete app were validated with it enabled.
 
-## 3. Generate verification data
+## 3. Shared acceptance
 
-The app first shows a native page. Tap `Native Auto Network`, then `Open Cocos
-Page`. After the Cocos screen becomes active, keep it open for at least ten
-seconds and tap each button:
+Run the [unified acceptance flow](../README.md#统一验收creator-2x--3x) for both
+Creator generations and both native platforms. It covers network, RUM, Logs,
+Replay, privacy, and the interactive **Starport Game**. Open it through
+**Open Cocos Page → Open Starport Game**. The game supports deployment, weapons,
+movement, shooting, dash, repair, pause, victory/defeat, and results.
 
-- `Auto Network`: one automatically tracked XHR Resource with Trace headers
-- `Manual Trace`: explicit Trace headers plus a manually managed RUM Resource
-- `RUM + Log`: one Action and one RUM-linked custom Log
-- `RUM Error`: one Error and one error-level linked Log
-- `Replay change`: a visible color delta for Session Replay; tap several times
-- `COMPONENT-3141`: a node with `ReplayPrivacy` in its default Mask mode; gray in Replay
-- `HIDE-ME-2718`: a node with `ReplayPrivacy` in Hide mode; black in Replay
-- `MASK-ME-8391`: a node protected through `setPrivacy(node, 'mask')`; gray in Replay
-- `Mask: move + scale`: translates the probe group and scales it to 85%; tap again to restore
-- `Mask: toggle fit`: switches between `SHOW_ALL` and `FIXED_HEIGHT`; verify the private token stays fully gray in Replay after each change, while nearby public content remains visible
-- `Native page`: leaves Cocos and returns RUM View/Replay ownership to native UI
+`npm run setup` installs the common game source and audio from `../acceptance-game`.
+After changing that source, run `npm run game:sync` before exporting again.
+Common steps and expected results are maintained only in the shared checklist;
+the sections below describe engine/platform-specific checks.
 
-### Privacy visual acceptance
+### 3D capture verification
 
-`npm run setup` installs the `ReplayPrivacy` component script used by this sample. The two component probes attach that script at runtime, demonstrating the same component rules used by scene and prefab nodes; the third probe uses the code API.
+`Extra: 3D Replay scene` switches to actual `MeshRenderer` geometry: a rotating
+orange cube, an orbiting cyan sphere, a magenta occluder, a blue tower, and a
+ground grid. A perspective camera and a directional light make depth,
+occlusion, and changing geometry visible. `assets/resources/Replay3D.mtl`
+explicitly includes the PBR material dependency in native builds.
 
-Compare the live page with its Replay at each layout/camera setting:
+Tap the left third of the screen to return to the existing 2D sample, the
+middle third to toggle the HUD, or the right third to pause/resume movement.
+These gestures still work with the HUD hidden. Returning restores the 2D
+Replay camera and the code privacy probe.
 
-1. The three red rectangular targets and their synthetic tokens are visible on the live page.
-2. Only those targets become gray / black / gray in Replay. All token text must disappear.
-3. All twelve green guard strips, the two **KEEP ME** labels, the public caption, and surrounding buttons remain visible and unchanged. Each guard is a sibling, separated from the target by a two-unit gap.
-4. Repeat after **Mask: move + scale**, then after the camera/fit toggle, and with both changes combined. Check all four edges of each target for leakage or spill. Capture resolution can round a projected boundary outward by less than one pixel.
+Verify both cases against the live application:
 
-The targets deliberately have square corners and labels inside their bounds. Replay currently masks projected rectangles; this example verifies rectangular control bounds, not a per-pixel silhouette for rounded or rotated graphics, or independent visibility of overlapping controls.
+1. **HUD hidden:** compare the 3D model positions, orientation, colors, depth
+   occlusion, and ground grid with SDK Replay frames. Keep it running to check
+   that motion produces changing frames.
+2. **HUD visible:** the caption is rendered by an independent UI camera.
+   The sample deliberately keeps `setReplayCamera()` on the 3D camera. The
+   current SDK captures the 3D scene but omits this caption. This case exposes
+   the single-camera limitation; it is not full-screen composition support.
 
-The native View is `HybridNativeAndroidHome`; after opening Cocos, the active
-View becomes `CocosHybridCreator3Sample`. Every event also includes
-`sample_name=cocos-hybrid-creator3` to make filtering unambiguous.
+Native capture was exercised on Creator 3.8.8 with Android 12 / GLES3 and
+iOS 26.5 / Metal simulators, using fixed model poses and a moved camera for
+screen-to-capture comparisons. This validates the SDK's native frame capture;
+it does not establish physical-device coverage, Creator 2 3D coverage, or an
+end-to-end upload/player result.
 
-Both network samples target `https://httpbin.org/get`, which echoes propagation
-headers and proves Cocos-side injection. A Trace record itself must be produced
-by an APM-instrumented server. To verify an end-to-end Trace-to-RUM link, change
-`AUTO_TEST_URL` and `TRACE_TEST_URL` in `assets/HybridTelemetrySample.ts` to
-endpoints served by your instrumented backend. Keep the automatic request free
-of manual RUM calls, and keep the manual request on the saved untracked XHR
-methods to avoid duplicate Resource collection.
+### Shared iOS checks
 
-Call the exported `leaveHybridCocos()` only when a real Hybrid host removes the
-Cocos container and returns to native UI. Do not call it during ordinary Cocos
-scene changes.
+Follow [iOS network collection](../README.md#ios-nsurlconnection-automatic-collection)
+and [Swift Package Manager](../README.md#using-swift-package-manager-on-ios)
+in the common instructions. These procedures apply to both generations.

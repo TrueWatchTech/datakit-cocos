@@ -14,7 +14,9 @@ describe('extension installation', () => {
       mkdirSync(join(project, 'assets'), { recursive: true });
       mkdirSync(join(sdk, 'bin'), { recursive: true });
       cpSync(resolve('installer/cli.cjs'), join(sdk, 'bin', 'cli.cjs'));
-      cpSync(resolve('components'), join(sdk, 'components'), { recursive: true });
+      for (const file of ['managed-assets.cjs', 'legacy-asset-hashes.json']) {
+        cpSync(resolve('integrations/shared', file), join(sdk, 'bin', file));
+      }
       writeFileSync(join(sdk, 'package.json'), JSON.stringify({ name: '@truewatchtech/cocos-sdk' }));
       mkdirSync(join(sdk, 'extensions', `creator${creator}`), { recursive: true });
       writeFileSync(join(sdk, 'extensions', `creator${creator}`, 'package.json'), '{}');

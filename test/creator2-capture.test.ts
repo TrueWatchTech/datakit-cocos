@@ -1,8 +1,8 @@
 /// <reference path="../src/creator2/shims.d.ts" />
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FTCreator2CanvasCapture } from '../src/creator2/capture';
-import { flipRgbaRows } from '../src/core/replay-pixels';
+import { FTCreator2CanvasCapture } from '../src/session-replay/creator2/capture';
+import { flipRgbaRows } from '../src/session-replay/core/replay-pixels';
 
 const originalCC = (globalThis as { cc?: unknown }).cc;
 

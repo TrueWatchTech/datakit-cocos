@@ -59,7 +59,8 @@ for (const relativePath of requiredHostFiles) {
   }
 }
 
-const { installNative } = require(bridgeInstaller);
+const { installNative, readIosDependencyManager } = require(bridgeInstaller);
+const useSPM = readIosDependencyManager?.(buildRoot, extensionRoot) === 'spm';
 installNative(buildRoot, extensionRoot, console);
 
 const nativeHostBuild = path.join(buildRoot, 'hybrid-sample-native');
@@ -75,17 +76,32 @@ const rootGradleFiles = files.filter((file) => (
 const appActivities = files.filter((file) => path.basename(file) === 'AppActivity.java');
 const androidManifests = files.filter((file) => /(?:^|\/)app\/AndroidManifest\.xml$/.test(normalize(file)));
 const podfiles = files.filter((file) => path.basename(file) === 'Podfile');
+const spmProjects = useSPM ? files.filter((file) => (
+  path.basename(file) === 'project.pbxproj'
+  && readFileSync(file, 'utf8').includes('COCOS_SDK_XCODE_PROJECT')
+)) : [];
+const iosProjectCount = useSPM ? spmProjects.length : podfiles.length;
 const iosLaunchFiles = files.filter((file) => ['AppDelegate.mm', 'AppController.mm'].includes(path.basename(file)));
 
 gradleFiles.forEach((file) => patchGradle(file, path.join(nativeHostBuild, 'android')));
+if (creator === '3') {
+  gradleFiles.forEach((file) => patchAndroidPageAlignment(path.resolve(path.dirname(file), '../CMakeLists.txt')));
+}
 appActivities.forEach(patchAndroidLaunch);
 rootGradleFiles.forEach(patchFTPluginClasspath);
 androidManifests.forEach((file) => patchAndroidManifest(file, creator));
-podfiles.forEach((file) => patchPodfile(file, path.join(nativeHostBuild, 'ios')));
+if (useSPM) {
+  const { installSwiftPackage } = require(path.join(extensionRoot, 'install-spm.cjs'));
+  const hostPackage = path.join(nativeHostBuild, 'HybridSampleHost');
+  copyDirectory(path.join(nativeHostSource, 'ios'), hostPackage);
+  spmProjects.forEach((file) => installSwiftPackage(file, hostPackage, 'HybridSampleHost'));
+} else {
+  podfiles.forEach((file) => patchPodfile(file, path.join(nativeHostBuild, 'ios')));
+}
 iosLaunchFiles.forEach(patchIOSLaunch);
 
-if (gradleFiles.length === 0 && podfiles.length === 0) {
-  fail('No Android app/build.gradle or iOS Podfile was found. Build a native platform in Creator first.');
+if (gradleFiles.length === 0 && iosProjectCount === 0) {
+  fail('No Android app/build.gradle or iOS application project was found. Build a native platform in Creator first.');
 }
 if (gradleFiles.length > 0 && appActivities.length === 0) {
   fail('Android project found, but AppActivity.java could not be located.');
@@ -96,15 +112,15 @@ if (gradleFiles.length > 0 && rootGradleFiles.length === 0) {
 if (gradleFiles.length > 0 && androidManifests.length === 0) {
   fail('Android project found, but app/AndroidManifest.xml could not be located.');
 }
-if (podfiles.length > 0 && iosLaunchFiles.length === 0) {
+if (iosProjectCount > 0 && iosLaunchFiles.length === 0) {
   fail('iOS project found, but AppDelegate.mm/AppController.mm could not be located.');
 }
 
 process.stdout.write(
   `[cocos-hybrid-sample] Installed Creator ${creator} native host `
-  + `(${gradleFiles.length} Android, ${podfiles.length} iOS project files).\n`,
+  + `(${gradleFiles.length} Android, ${iosProjectCount} iOS project files).\n`,
 );
-if (podfiles.length > 0) {
+if (!useSPM && podfiles.length > 0) {
   process.stdout.write('[cocos-hybrid-sample] Run pod install in the generated iOS project directory.\n');
 }
 
@@ -118,7 +134,7 @@ function collectSearchRoots(root) {
     const nativeRoot = path.isAbsolute(value) ? value : path.resolve(path.dirname(file), value);
     if (existsSync(nativeRoot) && statSync(nativeRoot).isDirectory()) roots.push(nativeRoot);
   }
-  if (files.some((file) => path.basename(file) === 'Podfile')) {
+  if (files.some((file) => ['Podfile', 'project.pbxproj'].includes(path.basename(file)))) {
     const creator3IOSRoot = path.join(projectRoot, 'native/engine/ios');
     if (existsSync(creator3IOSRoot) && statSync(creator3IOSRoot).isDirectory()) roots.push(creator3IOSRoot);
   }
@@ -137,6 +153,7 @@ function patchGradle(file, androidHostRoot) {
     "apply plugin: 'ft-plugin'",
     'FTExt {',
     '    showLog = true',
+    '    instrumentHttpURLConnection = true',
     '}',
     'dependencies {',
     "    implementation 'com.squareup.okhttp3:okhttp:4.5.0'",
@@ -144,6 +161,22 @@ function patchGradle(file, androidHostRoot) {
   );
   block.push(ANDROID_END);
   replaceMarkedBlock(file, ANDROID_BEGIN, ANDROID_END, block.join('\n'));
+}
+
+function patchAndroidPageAlignment(file) {
+  if (!existsSync(file) || !/add_library\(\s*\$\{CC_LIB_NAME\}\s+SHARED\b/.test(readFileSync(file, 'utf8'))) {
+    fail(`Unable to locate the Creator 3 shared library target in ${file}`);
+  }
+  const begin = '# COCOS_HYBRID_ANDROID_PAGE_ALIGNMENT_BEGIN';
+  const end = '# COCOS_HYBRID_ANDROID_PAGE_ALIGNMENT_END';
+  replaceMarkedBlock(file, begin, end, [
+    begin,
+    '# Older NDKs need both options for 16 KB LOAD segments and GNU_RELRO boundaries.',
+    '# Scope this to libcocos; prebuilt shared libraries must be checked separately.',
+    'set_property(TARGET ${CC_LIB_NAME} APPEND_STRING PROPERTY LINK_FLAGS',
+    '    " -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384")',
+    end,
+  ].join('\n'));
 }
 
 function patchFTPluginClasspath(file) {
@@ -154,7 +187,7 @@ function patchFTPluginClasspath(file) {
     "    maven { url 'https://mvnrepo.truewatch.com/repository/maven-releases' }",
     '}',
     'dependencies {',
-    "    classpath 'com.truewatch.ft.mobile.sdk.tracker.plugin:ft-plugin:1.3.8'",
+    "    classpath 'com.truewatch.ft.mobile.sdk.tracker.plugin:ft-plugin:1.3.9-alpha01'",
     '}',
     FT_PLUGIN_END,
   ].join('\n');
@@ -177,18 +210,20 @@ function patchAndroidManifest(file, creatorVersion) {
   const activityName = `android:name="${cocosActivity}"`;
   const activityNameIndex = source.indexOf(activityName);
   const activityStart = activityNameIndex >= 0 ? source.lastIndexOf('<activity', activityNameIndex) : -1;
-  const activityEndStart = activityNameIndex >= 0 ? source.indexOf('</activity>', activityNameIndex) : -1;
-  if (activityStart < 0 || activityEndStart < 0) {
+  const openingTagEnd = activityStart >= 0 ? source.indexOf('>', activityStart) : -1;
+  const selfClosing = openingTagEnd >= 0 && source[openingTagEnd - 1] === '/';
+  const activityEndStart = selfClosing ? openingTagEnd : source.indexOf('</activity>', openingTagEnd);
+  if (activityStart < 0 || openingTagEnd < 0 || activityEndStart < 0) {
     fail(`Unable to locate ${cocosActivity} in ${file}`);
   }
-  const activityEnd = activityEndStart + '</activity>'.length;
+  const activityEnd = selfClosing ? openingTagEnd + 1 : activityEndStart + '</activity>'.length;
   let appActivity = source.slice(activityStart, activityEnd);
   if (creatorVersion === '2') {
     const openingTag = appActivity.match(/<activity\b[^>]*>/)?.[0];
     if (!openingTag) fail(`Unable to locate ${cocosActivity} activity tag in ${file}`);
     const withCocosProcess = /\bandroid:process\s*=/.test(openingTag)
       ? openingTag.replace(/\bandroid:process\s*=\s*"[^"]*"/, 'android:process=":cocos"')
-      : openingTag.replace(/>$/, ' android:process=":cocos">');
+      : openingTag.replace(/(\/?>)$/, ' android:process=":cocos"$1');
     appActivity = appActivity.replace(openingTag, withCocosProcess);
   }
   const withoutLauncher = appActivity.replace(/\s*<intent-filter>[\s\S]*?<\/intent-filter>/g, (filter) => (

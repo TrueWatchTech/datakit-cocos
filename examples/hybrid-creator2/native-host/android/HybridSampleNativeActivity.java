@@ -5,13 +5,18 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.IOException;
+import java.util.UUID;
+
+import org.cocos2dx.lib.HybridCocosHttpRequest;
 
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -24,6 +29,8 @@ public final class HybridSampleNativeActivity extends Activity {
     private static final String COCOS_ACTIVITY = "org.cocos2dx.javascript.AppActivity";
     private static final String AUTO_REQUEST_URL =
             "https://httpbin.org/get?sample=cocos-hybrid-creator2&layer=native-auto";
+    private static final String COCOS_HTTP_URL = "https://httpbin.org/get";
+    private static final String COCOS_HTTP_ERROR_URL = "https://httpbin.org/status/404";
     private static volatile boolean visible;
 
     // Keep Builder.build() in app code so ft-plugin can inject Resource and Trace interceptors.
@@ -39,7 +46,10 @@ public final class HybridSampleNativeActivity extends Activity {
         super.onCreate(savedInstanceState);
         HybridSampleSdk.start();
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-        setContentView(createContent());
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(createContent());
+        setContentView(scroll);
     }
 
     @Override
@@ -59,17 +69,17 @@ public final class HybridSampleNativeActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
-        root.setPadding(dp(48), dp(36), dp(48), dp(36));
+        root.setPadding(dp(32), dp(20), dp(32), dp(20));
         root.setBackgroundColor(Color.rgb(12, 18, 34));
 
-        TextView title = text("Cocos Hybrid · Native Android Page", 30, Color.WHITE);
-        root.addView(title, matchWrap(dp(16)));
+        TextView title = text("Cocos Hybrid · Native Android Page", 24, Color.WHITE);
+        root.addView(title, matchWrap(dp(8)));
 
         TextView subtitle = text(
                 "Native SDK owns initialization. Open Cocos to transfer RUM View and Replay ownership.",
-                17,
+                15,
                 Color.rgb(151, 164, 190));
-        root.addView(subtitle, matchWrap(dp(28)));
+        root.addView(subtitle, matchWrap(dp(12)));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -82,11 +92,22 @@ public final class HybridSampleNativeActivity extends Activity {
         Button openCocos = button("Open Cocos Page");
         openCocos.setOnClickListener(view -> openCocos());
         actions.addView(openCocos, weighted(0));
-        root.addView(actions, matchWrap(dp(34)));
+        root.addView(actions, matchWrap(dp(12)));
 
-        status = text("Preparing native telemetry…", 17, Color.rgb(44, 202, 178));
+        LinearLayout cocosRequests = new LinearLayout(this);
+        cocosRequests.setOrientation(LinearLayout.HORIZONTAL);
+        cocosRequests.setGravity(Gravity.CENTER);
+        Button cocosSuccess = button("Cocos HTTP 200");
+        cocosSuccess.setOnClickListener(view -> requestWithCocos(cocosSuccess, COCOS_HTTP_URL));
+        cocosRequests.addView(cocosSuccess, weighted(dp(12)));
+        Button cocosError = button("Cocos HTTP 404");
+        cocosError.setOnClickListener(view -> requestWithCocos(cocosError, COCOS_HTTP_ERROR_URL));
+        cocosRequests.addView(cocosError, weighted(0));
+        root.addView(cocosRequests, matchWrap(dp(12)));
+
+        status = text("Preparing native telemetry…", 15, Color.rgb(44, 202, 178));
         status.setBackgroundColor(Color.rgb(27, 39, 64));
-        status.setPadding(dp(20), dp(16), dp(20), dp(16));
+        status.setPadding(dp(12), dp(8), dp(12), dp(8));
         root.addView(status, matchWrap(0));
         return root;
     }
@@ -119,6 +140,32 @@ public final class HybridSampleNativeActivity extends Activity {
                         "Native auto Resource + Trace completed (" + statusCode + ")"));
             }
         });
+    }
+
+    private void requestWithCocos(Button button, String endpoint) {
+        String requestId = UUID.randomUUID().toString();
+        String url = endpoint + "?sample=cocos-hybrid-creator2&collection=cocos-urlconnection"
+                + "&request_id=" + requestId;
+        button.setEnabled(false);
+        status.setText("Cocos HTTP request in progress…");
+        new Thread(() -> {
+            String message;
+            try {
+                HybridCocosHttpRequest.Result result = HybridCocosHttpRequest.get(url);
+                Log.i("CocosHttpSample", "request_id=" + requestId + " status=" + result.statusCode
+                        + " bytes=" + result.responseBytes + " connection=" + result.connectionClass);
+                message = "Cocos HTTP completed (" + result.statusCode + ", "
+                        + result.responseBytes + " bytes) · " + requestId;
+            } catch (IOException error) {
+                Log.w("CocosHttpSample", "request_id=" + requestId + " failed", error);
+                message = "Cocos HTTP failed: " + error.getMessage();
+            }
+            final String completed = message;
+            runOnUiThread(() -> {
+                button.setEnabled(true);
+                status.setText(completed);
+            });
+        }, "CocosHttpSample").start();
     }
 
     private TextView text(String value, int sizeSp, int color) {

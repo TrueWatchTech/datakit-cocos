@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES5",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "lib": [
+      "ES2015",
+      "DOM"
+    ],
+    "rootDir": "src/session-replay",
+    "outDir": "packages/cocos-session-replay/dist/creator2",
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@truewatchtech/cocos-sdk/plugin-api": [
+        "packages/cocos/dist/creator2/core/plugin-api.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/session-replay/core/**/*.ts",
+    "src/session-replay/creator2/**/*.ts"
+  ]
+}

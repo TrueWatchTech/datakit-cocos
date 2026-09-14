@@ -1,0 +1,4 @@
+{
+  "main": "../dist/creator2/core/plugin-api.js",
+  "types": "../dist/creator2/core/plugin-api.d.ts"
+}

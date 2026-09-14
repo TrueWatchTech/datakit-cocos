@@ -28,7 +28,13 @@ export function verifyRelease(tag = process.env.RELEASE_GIT_TAG || '') {
   const sdk = JSON.parse(readFileSync('packages/cocos/package.json', 'utf8'));
   const runtime = readFileSync('src/core/version.ts', 'utf8').match(/FT_COCOS_SDK_VERSION\s*=\s*'([^']+)'/)?.[1];
   const podspec = readFileSync('native/ios/FTCocosBridge.podspec', 'utf8').match(/s\.version\s*=\s*'([^']+)'/)?.[1];
-  const versions = { workspace: root.version, package: sdk.version, runtime, podspec };
+  const replay = JSON.parse(readFileSync('packages/cocos-session-replay/package.json', 'utf8'));
+  const replayRuntime = readFileSync('src/session-replay/core/version.ts', 'utf8').match(/FT_COCOS_REPLAY_VERSION\s*=\s*'([^']+)'/)?.[1];
+  const replayPodspec = readFileSync('src/session-replay/native/ios/FTCocosReplayBridge.podspec', 'utf8').match(/s\.version\s*=\s*'([^']+)'/)?.[1];
+  const versions = { workspace: root.version, package: sdk.version, runtime, podspec, replay: replay.version, replayRuntime, replayPodspec };
+  if (replay.name !== '@truewatchtech/cocos-session-replay' || replay.peerDependencies?.[sdk.name] !== sdk.version) {
+    throw new Error('Replay must declare the coordinated TrueWatch SDK peer');
+  }
   if (Object.values(versions).some((version) => version !== sdk.version)) {
     throw new Error(`Cocos versions do not match: ${JSON.stringify(versions)}`);
   }
@@ -39,7 +45,9 @@ export function verifyRelease(tag = process.env.RELEASE_GIT_TAG || '') {
   const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
   if (lock.packages[''].version !== sdk.version
     || lock.packages['packages/cocos'].version !== sdk.version
-    || lock.packages['packages/cocos'].name !== sdk.name) {
+    || lock.packages['packages/cocos'].name !== sdk.name
+    || lock.packages['packages/cocos-session-replay']?.version !== sdk.version
+    || lock.packages['packages/cocos-session-replay']?.name !== replay.name) {
     throw new Error('Workspace lockfile does not match the TrueWatch package');
   }
   if (tag) validateReleaseTag(tag, sdk.version);

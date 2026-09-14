@@ -39,36 +39,31 @@ function touch(id = 4) {
 }
 beforeEach(() => { state.scene = new Scene(); state.input = new Events(); state.director = new Events(); });
 describe('Creator 3 touch tracking', () => {
-  it('records UI touches swallowed before global input and preserves normalized coordinates', () => {
-    const events: unknown[] = [];
-    new FTCreator3TrackingHooks().onReplayPointer((event) => events.push(event));
-    state.scene.emit('start', touch());
+  it('records UI actions swallowed before global input', () => {
+    const action = vi.fn();
+    const stop = new FTCreator3TrackingHooks().onAction(action);
     state.scene.emit('end', touch());
-    expect(events).toEqual([
-      expect.objectContaining({ eventType: 'down', pointerId: 4, normalizedX: 0.25, normalizedY: 0.75 }),
-      expect.objectContaining({ eventType: 'up', pointerId: 4, normalizedX: 0.25, normalizedY: 0.75 }),
-    ]);
+    expect(action).toHaveBeenCalledExactlyOnceWith('Button', { x: 60, y: 45 });
+    stop();
   });
-  it('keeps non-UI input, deduplicates shared UI events, and preserves every finger', () => {
+  it('deduplicates shared UI actions while preserving every finger', () => {
     const callback = vi.fn();
-    new FTCreator3TrackingHooks().onReplayPointer(callback);
+    const stop = new FTCreator3TrackingHooks().onAction(callback);
     let id = 1;
-    const event = { getID: () => id };
-    state.scene.emit('start', event);
-    state.input.emit('start', event);
+    const event = { getID: () => id, target: { name: 'Button' } };
+    state.scene.emit('end', event);
+    state.input.emit('end', event);
+    expect(callback).toHaveBeenCalledTimes(1);
     id = 2;
-    state.scene.emit('start', event);
-    state.input.emit('start', event);
-    state.input.emit('end', touch(1));
-    expect(callback.mock.calls.map(([event]) => [event.eventType, event.pointerId])).toEqual([
-      ['down', 1], ['down', 2], ['up', 1],
-    ]);
+    state.scene.emit('end', event);
+    state.input.emit('end', event);
+    expect(callback).toHaveBeenCalledTimes(2);
+    stop();
   });
   it('tracks button actions, rebinds scenes and removes all listeners on stop', () => {
     const action = vi.fn();
-    const pointer = vi.fn();
     const hooks = new FTCreator3TrackingHooks();
-    const stops = [hooks.onAction(action), hooks.onReplayPointer(pointer)];
+    const stops = [hooks.onAction(action)];
     const previous = state.scene;
     state.scene = new Scene();
     state.director.emit('scene');
@@ -76,7 +71,6 @@ describe('Creator 3 touch tracking', () => {
     state.scene.emit('end', touch());
     state.scene.emit('cancel', touch());
     expect(action).toHaveBeenCalledExactlyOnceWith('Button', { x: 60, y: 45 });
-    expect(pointer).toHaveBeenCalledTimes(2);
     stops.forEach((stop) => stop());
     expect(state.scene.count()).toBe(0);
     expect(state.input.count()).toBe(0);

@@ -1,7 +1,7 @@
 /// <reference path="../src/creator2/shims.d.ts" />
 
 import { describe, expect, it } from 'vitest';
-import { FTCreator2TrackingHooks } from '../src/creator2/auto';
+import { FTCreator2PointerSource } from '../src/session-replay/creator2/pointer';
 
 type TouchHandler = (event: unknown) => void;
 
@@ -51,7 +51,7 @@ describe('Creator 2 touch tracking', () => {
     };
 
     const events: unknown[] = [];
-    const stop = new FTCreator2TrackingHooks().onReplayPointer((event) => events.push(event));
+    const stop = new FTCreator2PointerSource().onReplayPointer((event) => events.push(event));
     expect(firstScene.registrations).toEqual([
       { type: 'touchstart', capture: true },
       { type: 'touchend', capture: true },

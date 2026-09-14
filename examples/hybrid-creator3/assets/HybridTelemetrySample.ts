@@ -1,4 +1,6 @@
+import { StarportScene } from './StarportScene';
 import ReplayPrivacy, { ReplayPrivacyMode } from './truewatch-cocos-sdk/ReplayPrivacy';
+import { Replay3DScene } from './Replay3DScene';
 import {
   _decorator,
   Button,
@@ -18,7 +20,10 @@ import {
   sys,
   view,
 } from 'cc';
-import { truewatchSdk, setReplayCamera } from '@truewatchtech/cocos-sdk/creator3';
+import { truewatchSdk as baseSdk } from '@truewatchtech/cocos-sdk/creator3';
+import { withSessionReplay } from '@truewatchtech/cocos-session-replay/creator3';
+
+const truewatchSdk = withSessionReplay(baseSdk);
 
 const { ccclass } = _decorator;
 
@@ -67,6 +72,8 @@ interface UntrackedXhrMethods {
 }
 
 class HybridTelemetryRuntime {
+  private sampleRoot?: Node;
+  private gameNode?: Node;
   private status?: Label;
   private replayCard?: Graphics;
   private privacyMaskProbe?: Node;
@@ -78,10 +85,16 @@ class HybridTelemetryRuntime {
   private entered = false;
   private waitingForNativeReturn = false;
   private untrackedXhr?: UntrackedXhrMethods;
+  private sampleCamera?: Camera;
+  private sampleCanvas?: Node;
+  private replay3D?: Replay3DScene;
 
   start(): void {
     const { root, camera } = this.createScene();
-    setReplayCamera(camera);
+    this.sampleCamera = camera;
+    this.sampleCanvas = root.parent!;
+    truewatchSdk.setReplayCamera(camera);
+    this.sampleRoot = root;
     this.render(root);
 
     if (!sys.isNative) {
@@ -99,6 +112,7 @@ class HybridTelemetryRuntime {
         replay: {
           captureFps: 2,
           maxImageDimension: 720,
+          imagePolicy: { quality: 'medium', maxFrameBytes: 40 * 1024 },
           touchPrivacy: 'show',
         },
         autoTrack: {
@@ -139,7 +153,7 @@ class HybridTelemetryRuntime {
 
   private emitRumAndLog(): void {
     const attributes = { ...ATTRIBUTES, button: 'rum_log', emitted_at: Date.now() };
-    truewatchSdk.rum.addAction('creator3_rum_log_clicked', 'click', attributes);
+    truewatchSdk.rum.addAction('rum_log_clicked', 'click', attributes);
     truewatchSdk.logger.log('Creator 3 sample emitted a RUM Action and linked Log', 'info', attributes);
     this.setStatus('RUM Action + linked Log emitted', COLORS.primary);
   }
@@ -185,7 +199,7 @@ class HybridTelemetryRuntime {
     };
 
     truewatchSdk.rum.startResource(resourceKey, attributes);
-    truewatchSdk.rum.addAction('creator3_trace_request_started', 'network', attributes);
+    truewatchSdk.rum.addAction('trace_request_started', 'network', attributes);
     this.setStatus('Trace headers generated; request in progress…', COLORS.info);
 
     const request = new XMLHttpRequest();
@@ -231,7 +245,7 @@ class HybridTelemetryRuntime {
   private emitError(): void {
     const error = new Error('Creator 3 Hybrid sample diagnostic error');
     const attributes = { ...ATTRIBUTES, error_source: 'manual_button' };
-    truewatchSdk.rum.addAction('creator3_error_clicked', 'click', attributes);
+    truewatchSdk.rum.addAction('error_clicked', 'click', attributes);
     truewatchSdk.rum.addError(error.message, error.stack || '', 'sample_error', 'run', attributes);
     truewatchSdk.logger.log(error.message, 'error', attributes);
     this.setStatus('RUM Error + linked error Log emitted', COLORS.danger);
@@ -248,7 +262,7 @@ class HybridTelemetryRuntime {
       this.replayCard.fill();
     }
     const attributes = { ...ATTRIBUTES, replay_state: this.replayState };
-    truewatchSdk.rum.addAction('creator3_replay_state_changed', 'click', attributes);
+    truewatchSdk.rum.addAction('replay_state_changed', 'click', attributes);
     truewatchSdk.logger.log(`Replay visual state changed to ${this.replayState}`, 'info', attributes);
     this.setStatus(`Replay visual state changed: ${this.replayState}`, color);
   }
@@ -257,7 +271,7 @@ class HybridTelemetryRuntime {
     this.maskShowAll = !this.maskShowAll;
     const scenario = this.maskShowAll ? 'show_all' : 'fixed_height';
     view.setDesignResolutionSize(960, 640, this.maskShowAll ? ResolutionPolicy.SHOW_ALL : ResolutionPolicy.FIXED_HEIGHT);
-    truewatchSdk.rum.addAction('creator3_mask_fit_changed', 'click', { ...ATTRIBUTES, mask_scenario: scenario });
+    truewatchSdk.rum.addAction('mask_fit_changed', 'click', { ...ATTRIBUTES, mask_scenario: scenario });
     this.setStatus(`Mask verification: ${scenario} · private token must stay gray in Replay`, COLORS.primary);
   }
 
@@ -398,7 +412,83 @@ class HybridTelemetryRuntime {
 
     const statusPanel = this.panel(root, 'StatusPanel', 0, -180, 780, 84, COLORS.panel);
     this.status = this.label(statusPanel, 'Preparing Hybrid integration…', 0, 0, 730, 50, 18, COLORS.muted);
-    this.label(root, `View: ${VIEW_NAME}`, 0, -258, 820, 24, 15, COLORS.muted);
+    this.button(root, 'StarportGame', 'Open Starport Game', -200, -258, 360, 40, () => this.openGame(), COLORS.primary);
+    this.button(root, 'Replay3D', 'Extra: 3D Replay scene', 200, -258, 360, 40, () => this.open3DScene(), COLORS.info);
+  }
+
+  private async open3DScene(): Promise<void> {
+    if (this.replay3D || !this.sampleCamera || !this.sampleCanvas) return;
+    this.sampleCamera.enabled = false;
+    this.sampleCanvas.active = false;
+    if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
+    const node = new Node('Replay3DValidation');
+    director.getScene()!.addChild(node);
+    this.replay3D = node.addComponent(Replay3DScene);
+    const restore = (): void => {
+      truewatchSdk.setReplayCamera(this.sampleCamera);
+      this.sampleCamera!.enabled = true;
+      this.sampleCanvas!.active = true;
+      if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask');
+      node.active = false;
+      node.destroy();
+      this.replay3D = undefined;
+    };
+    try {
+      await this.replay3D.initialize(restore);
+      truewatchSdk.setReplayCamera(this.replay3D.camera);
+      if (this.entered) truewatchSdk.rum.addAction('replay_3d_scene_opened', 'click', ATTRIBUTES);
+    } catch (error) {
+      restore();
+      this.setStatus(`Unable to load 3D scene: ${String(error)}`, COLORS.danger);
+      console.error('[HybridTelemetrySample] Unable to load 3D scene', error);
+    }
+  }
+
+  private openGame(): void {
+    if (this.gameNode || !this.sampleRoot) return;
+    const sampleRoot = this.sampleRoot;
+    // The shared game uses the same screen camera, so HUD and gameplay are captured together.
+    view.setDesignResolutionSize(960, 640, ResolutionPolicy.SHOW_ALL);
+    sampleRoot.active = false;
+    if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
+    const node = new Node('StarportGame');
+    node.layer = Layers.Enum.UI_2D;
+    sampleRoot.parent!.addChild(node);
+    this.gameNode = node;
+    const restore = (): void => {
+      if (this.gameNode !== node) return;
+      this.gameNode = undefined;
+      node.active = false;
+      node.destroy();
+      // Rebuild procedural Graphics after returning; native 3.x can lose their
+      // uploaded geometry when the old UI subtree is disabled and re-enabled.
+      sampleRoot.children.slice().forEach(child => { child.active = false; child.destroy(); });
+      this.privacyLayoutMoved = false;
+      this.replayState = 0;
+      sampleRoot.active = true;
+      this.render(sampleRoot);
+      this.setStatus(this.entered ? 'Cocos page active · automatic and manual network samples ready' : 'Editor preview only. Build Android or iOS to call the native bridge.', this.entered ? COLORS.primary : COLORS.warning);
+      view.setDesignResolutionSize(960, 640, this.maskShowAll ? ResolutionPolicy.SHOW_ALL : ResolutionPolicy.FIXED_HEIGHT);
+      truewatchSdk.setReplayCamera(this.sampleCamera);
+      if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask');
+      if (this.entered) { truewatchSdk.rum.stopView(); truewatchSdk.rum.startView(VIEW_NAME, ATTRIBUTES); }
+    };
+    try {
+      node.addComponent(StarportScene).initialize({
+        exit: restore,
+        page: name => {
+          if (!this.entered) return;
+          truewatchSdk.rum.stopView();
+          truewatchSdk.rum.startView(`Starport/${name}`, { ...ATTRIBUTES, game: 'starport' });
+        },
+        track: (action, attributes) => {
+          if (!this.entered) return;
+          const fields = { ...ATTRIBUTES, ...attributes };
+          truewatchSdk.rum.addAction(action, 'custom', fields);
+          truewatchSdk.logger.log(`starport ${action}`, 'info', fields);
+        },
+      }, this.sampleCamera!);
+    } catch (error) { restore(); this.setStatus(`Unable to open game: ${String(error)}`, COLORS.danger); }
   }
 
   private panel(parent: Node, name: string, x: number, y: number, width: number, height: number, color: Color, square = false): Node {

@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "sdk:build": "npm --prefix ../.. run build",
-    "sdk:install": "node node_modules/@truewatchtech/cocos-sdk/bin/cli.cjs install --project . --creator 2",
-    "setup": "npm run sdk:build && npm install && npm run sdk:install",
+    "sdk:install": "node node_modules/@truewatchtech/cocos-sdk/bin/cli.cjs install --project . --creator 2 --replay",
+    "setup": "npm run game:sync && npm run sdk:build && npm install && npm run sdk:install",
     "configure": "node ../../scripts/configure-sample.mjs --output-root . --native-host-dir native-host",
-    "native:install": "node ../../scripts/install-hybrid-host.mjs --project . --creator 2"
+    "native:install": "node ../../scripts/install-hybrid-host.mjs --project . --creator 2",
+    "game:sync": "node ../../scripts/sync-sample-game.mjs"
   },
   "dependencies": {
-    "@truewatchtech/cocos-sdk": "file:../../packages/cocos"
+    "@truewatchtech/cocos-sdk": "file:../../packages/cocos",
+    "@truewatchtech/cocos-session-replay": "file:../../packages/cocos-session-replay"
   }
 }

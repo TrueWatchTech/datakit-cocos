@@ -25,4 +25,3 @@ jobs:
       - run: npm run verify
         env:
           RELEASE_GIT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-      - run: npm run pack

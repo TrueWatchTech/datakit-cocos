@@ -38,3 +38,9 @@
 
 *.tgz
 .DS_Store
+
+# Generated assets for both publishable packages.
+/packages/*/extensions/
+/packages/*/bin/
+/packages/*/LICENSE
+/packages/*/THIRD_PARTY_NOTICES

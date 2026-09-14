@@ -118,55 +118,6 @@ export interface FTTraceConfig {
   enableNativeAutoTrace?: boolean;
 }
 
-/** Visual treatment applied to a Session Replay node. */
-export type FTReplayPrivacyMode = 'mask' | 'hide' | 'unmask';
-
-/** Whether Session Replay records touch positions. */
-export type FTReplayTouchPrivacy = 'show' | 'hide';
-
-/** Image quality preset used by Cocos Session Replay. */
-export type FTReplayQuality = 'low' | 'medium' | 'high';
-
-/** Image traffic controls for Cocos Session Replay. */
-export interface FTReplayImagePolicy {
-  /** Compression, size, and traffic preset. @defaultValue `'medium'` */
-  quality?: FTReplayQuality;
-  /** Maximum encoded bytes for a normal image resource. */
-  maxFrameBytes?: number;
-  /** Maximum encoded image bytes retained in a rolling 60-second window. */
-  maxBytesPerMinute?: number;
-  /** Adapts effective capture rate, image quality, and size as the budget fills. @defaultValue `true` */
-  adaptiveCapture?: boolean;
-}
-
-/** Session Replay configuration for standalone Cocos applications. */
-export interface FTSessionReplayConfig {
-  /** Replay sampling rate from `0` to `1`. */
-  sampleRate?: number;
-  /** Additional replay sampling rate from `0` to `1` for sessions that contain errors. */
-  sessionOnErrorSampleRate?: number;
-  /** Canvas capture rate in frames per second. Accepts integers from `1` to `5`. @defaultValue `1` */
-  captureFps?: number;
-  /** Maximum width or height of a captured frame. Accepts `1` to `2048`. @defaultValue `720` */
-  maxImageDimension?: number;
-  /** Image compression and rolling traffic-budget controls. */
-  imagePolicy?: FTReplayImagePolicy;
-  /** Whether captured replays include touch positions. @defaultValue `'hide'` */
-  touchPrivacy?: FTReplayTouchPrivacy;
-}
-
-/** Cocos-side Session Replay settings when the native host owns SDK initialization. */
-export interface FTHybridSessionReplayConfig {
-  /** Canvas capture rate in frames per second. Accepts integers from `1` to `5`. @defaultValue `1` */
-  captureFps?: number;
-  /** Maximum width or height of a captured frame. Accepts `1` to `2048`. @defaultValue `720` */
-  maxImageDimension?: number;
-  /** Image compression and rolling traffic-budget controls. */
-  imagePolicy?: FTReplayImagePolicy;
-  /** Whether captured replays include touch positions. @defaultValue `'hide'` */
-  touchPrivacy?: FTReplayTouchPrivacy;
-}
-
 /** Request and response details recorded for a manually tracked resource. */
 export interface FTResourceContent {
   /** Absolute resource URL. */
@@ -233,16 +184,12 @@ export interface FTCocosConfig {
   logger?: FTLoggerConfig;
   /** Enables and configures distributed tracing. */
   trace?: FTTraceConfig;
-  /** Enables and configures Session Replay. */
-  replay?: FTSessionReplayConfig;
   /** Enables selected Cocos automatic-tracking integrations. */
   autoTrack?: FTAutoTrackingConfig;
 }
 
 /** Cocos-side configuration for applications initialized by a native host. */
 export interface FTCocosHybridConfig {
-  /** Enables Cocos canvas capture while the application is inside Cocos. */
-  replay?: FTHybridSessionReplayConfig;
   /** Enables selected Cocos automatic-tracking integrations. */
   autoTrack?: FTAutoTrackingConfig;
 }
@@ -251,39 +198,4 @@ export interface FTCocosHybridConfig {
 export interface FTCocosEnterOptions {
   /** RUM view name used when automatic scene tracking is disabled. */
   viewName?: string;
-}
-
-/** Internal native RUM context used by Session Replay encoding. */
-export interface FTRUMContext {
-  applicationId: string;
-  sessionId: string;
-  viewId: string;
-  globalContext?: FTAttributes;
-}
-
-/** Internal privacy rectangle projected into a captured frame. */
-export interface FTPrivacyRegion {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  mode: Exclude<FTReplayPrivacyMode, 'unmask'>;
-}
-
-/** Internal in-memory representation of a captured Cocos frame. */
-export interface FTCapturedFrame {
-  rgba: Uint8Array;
-  width: number;
-  height: number;
-  timestamp: number;
-  privacyRegions?: FTPrivacyRegion[];
-}
-
-/** Internal persisted representation of a captured Cocos frame. */
-export interface FTStoredFrame {
-  path: string;
-  width: number;
-  height: number;
-  timestamp: number;
-  fingerprint: string;
 }

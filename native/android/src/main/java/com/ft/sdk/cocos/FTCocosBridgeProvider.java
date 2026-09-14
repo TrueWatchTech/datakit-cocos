@@ -32,7 +32,7 @@ public final class FTCocosBridgeProvider extends ContentProvider {
         }
         String payload = extras == null ? null : extras.getString(ARGUMENT_PAYLOAD);
         Bundle result = new Bundle();
-        result.putString(RESULT_RESPONSE, FTCocosBridge.invokeLocal(argument, payload));
+        result.putString(RESULT_RESPONSE, FTCocosBridgeModules.invokeLocal(extras == null ? "sdk" : extras.getString("endpoint", "sdk"), argument, payload));
         return result;
     }
 

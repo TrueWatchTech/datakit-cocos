@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FTSessionReplay, type FTCanvasCapture } from '../src/core/replay';
-import { invokeReplayAsync } from '../src/core/replay-async-transport';
-import { persistReplayFrame, disposeReplayFrame } from '../src/core/replay-file';
+import { FTSessionReplay, type FTCanvasCapture } from '../src/session-replay/core/replay';
+import { invokeReplayAsync } from '../src/session-replay/core/replay-async-transport';
+import { persistReplayFrame, disposeReplayFrame } from '../src/session-replay/core/replay-file';
 import type { FTNativeTransport } from '../src/core/transport';
 
 function deferred<T>() {
@@ -27,12 +27,29 @@ function setup() {
     capture: vi.fn(async () => ({ rgba: new Uint8Array(16), width: 2, height: 2, timestamp: 1 })),
     persist: vi.fn(async () => ({ path: '/frame', width: 2, height: 2, timestamp: 1, fingerprint: 'fp' })),
     disposeStoredFrame: vi.fn(() => cleanup.promise),
+    dispose: vi.fn(),
     setPrivacy() {},
   };
   return { save, cleanup, invoke, transport, capture, replay: new FTSessionReplay(transport, capture) };
 }
 
 describe('asynchronous Replay lifecycle', () => {
+  it.each(['standalone', 'hybrid', 'rollback'] as const)('releases capture resources on %s shutdown', mode => {
+    vi.useFakeTimers();
+    const { replay, capture } = setup();
+    if (mode === 'standalone') {
+      replay.start();
+      replay.stop();
+    } else {
+      replay.attachHybrid({});
+      if (mode === 'hybrid') {
+        replay.enterHybrid();
+        replay.leaveHybrid();
+      } else replay.detachHybrid();
+    }
+    expect(capture.dispose).toHaveBeenCalledOnce();
+  });
+
   it('holds one frame and its file until encoding and cleanup complete', async () => {
     const state = setup();
     const pending = state.replay.captureNow();

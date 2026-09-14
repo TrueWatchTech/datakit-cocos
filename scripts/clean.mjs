@@ -1,6 +1,8 @@
 import { rm } from 'node:fs/promises';
 
 const generated = [
+  'packages/cocos/components',
+  ...['dist', 'native', 'components', 'LICENSE', 'THIRD_PARTY_NOTICES'].map(name => `packages/cocos-session-replay/${name}`),
   'packages/cocos/dist',
   'packages/cocos/extensions',
   'packages/cocos/native',

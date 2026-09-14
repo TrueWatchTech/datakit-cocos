@@ -1,11 +1,9 @@
-name: Publish TrueWatch npm package
+name: Publish TrueWatch npm packages
 
 on:
   push:
-    tags: ['agent_*']
-
-permissions:
-  contents: read
+    tags:
+      - "agent_*"
 
 concurrency:
   group: truewatch-npm-publish
@@ -13,21 +11,31 @@ concurrency:
 
 jobs:
   verify:
+    name: Verify package pair
     if: github.repository == 'TrueWatchTech/datakit-cocos'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: "24"
           package-manager-cache: false
       - run: npm ci
-      - run: npm run verify
+      - run: npm run verify:release
         env:
           RELEASE_GIT_TAG: ${{ github.ref_name }}
-      - run: node scripts/pack.mjs
+      - run: node scripts/publish-npm-token.mjs --check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:release-policy
+      - run: npm run test:publish-token
+      - run: npm run build
+      - run: npm run test:packed
 
   publish:
+    name: Publish base SDK then Session Replay
     needs: verify
     if: github.repository == 'TrueWatchTech/datakit-cocos'
     runs-on: ubuntu-latest
@@ -39,20 +47,16 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "24"
           package-manager-cache: false
       - run: npm ci
-      - run: npm run build
-      - name: Validate release and select npm dist-tag
-        id: release
-        run: node scripts/publish-preflight.mjs
-        env:
-          RELEASE_GIT_TAG: ${{ github.ref_name }}
-      - name: Publish to npm
-        if: steps.release.outputs.already_published != 'true'
-        run: >-
-          npm publish
-          --workspace @truewatchtech/cocos-sdk
-          --tag "${{ steps.release.outputs.npm_dist_tag }}"
-          --access public
+      # Both npm packages must trust this repository, workflow and environment.
+      # npm >= 11.5.1 uses GitHub OIDC; no npm token secret is needed.
+      - name: Publish both inspected tarballs
+        run: node scripts/publish-npm-token.mjs --ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-release-pair
+          path: artifacts/npm-token-release/
+          if-no-files-found: ignore

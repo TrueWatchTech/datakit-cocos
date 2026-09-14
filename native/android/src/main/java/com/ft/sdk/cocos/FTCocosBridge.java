@@ -1,13 +1,5 @@
 package com.ft.sdk.cocos;
 
-import android.app.Activity;
-import android.app.ActivityManager;
-import android.app.Application;
-import android.content.Context;
-import android.net.Uri;
-import android.os.Build;
-import android.os.Bundle;
-import android.os.Process;
 
 import com.ft.sdk.DetectFrequency;
 import com.ft.sdk.FTLogger;
@@ -19,24 +11,15 @@ import com.ft.sdk.FTSdk;
 import com.ft.sdk.FTTraceConfig;
 import com.ft.sdk.FTTraceManager;
 import com.ft.sdk.LogCacheDiscard;
-import com.ft.sdk.SessionReplayManager;
 import com.ft.sdk.TraceType;
 import com.ft.sdk.garble.bean.AppState;
 import com.ft.sdk.garble.bean.NetStatusBean;
 import com.ft.sdk.garble.bean.ResourceParams;
 import com.ft.sdk.garble.bean.UserData;
-import com.ft.sdk.sessionreplay.FTSessionReplayConfig;
-import com.ft.sdk.sessionreplay.SessionReplayInternalCallback;
-import com.ft.sdk.sessionreplay.TouchPrivacy;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -52,9 +35,7 @@ public final class FTCocosBridge {
     }
 
     public static String invoke(String method, String payload) {
-        String forwarded = forwardToMainProcess(method, payload);
-        if (forwarded != null) return forwarded;
-        return invokeLocal(method, payload);
+        return FTBridgeTransport.invoke("sdk", method, payload);
     }
 
     static String invokeLocal(String method, String payload) {
@@ -77,62 +58,10 @@ public final class FTCocosBridge {
         }
     }
 
-    private static String forwardToMainProcess(String method, String payload) {
-        Activity activity = resolveActivity();
-        if (activity == null || !isSecondaryProcess(activity)) return null;
-
-        try {
-            Bundle arguments = new Bundle();
-            arguments.putString(FTCocosBridgeProvider.ARGUMENT_PAYLOAD, payload);
-            Uri uri = Uri.parse("content://" + activity.getPackageName()
-                    + FTCocosBridgeProvider.AUTHORITY_SUFFIX);
-            Bundle result = activity.getContentResolver().call(
-                    uri,
-                    FTCocosBridgeProvider.METHOD_INVOKE,
-                    method,
-                    arguments);
-            return result == null
-                    ? null
-                    : result.getString(FTCocosBridgeProvider.RESULT_RESPONSE);
-        } catch (IllegalArgumentException providerUnavailable) {
-            // Existing integrations may not have registered the optional bridge
-            // provider yet. Preserve their same-process behavior.
-            return null;
-        }
-    }
-
-    private static boolean isSecondaryProcess(Context context) {
-        String currentProcess = currentProcessName(context);
-        String mainProcess = context.getApplicationInfo().processName;
-        return currentProcess != null && mainProcess != null && !mainProcess.equals(currentProcess);
-    }
-
-    private static String currentProcessName(Context context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            return Application.getProcessName();
-        }
-        ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        if (manager == null) return null;
-        List<ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
-        if (processes == null) return null;
-        int currentPid = Process.myPid();
-        for (ActivityManager.RunningAppProcessInfo process : processes) {
-            if (process.pid == currentPid) return process.processName;
-        }
-        return null;
-    }
-
     private static Object dispatch(String method, JSONObject payload) throws Exception {
         switch (method) {
-            case "replay.beginSaveImage":
-                return FTCocosReplayImageJobs.begin(payload);
-            case "replay.pollSaveImage":
-                return FTCocosReplayImageJobs.poll(payload.getString("job"));
             case "hybrid.attach":
                 attachHybrid(payload);
-                return null;
-            case "hybrid.setExternalRecorderActive":
-                setExternalRecorderActive(payload.getBoolean("active"));
                 return null;
             case "sdk.configure":
                 configureSdk(payload);
@@ -196,25 +125,6 @@ public final class FTCocosBridge {
             case "trace.getHeaders":
                 return FTTraceManager.get().getTraceHeader(
                         payload.optString("resourceKey", ""), payload.getString("url"));
-            case "replay.configure":
-                configureReplay(payload);
-                return null;
-            case "replay.getContext":
-                return SessionReplayManager.get().getCurrentFlutterRumContext();
-            case "replay.saveImage":
-                return saveReplayImage(payload);
-            case "replay.saveImageV2":
-                return saveReplayImageV2(payload);
-            case "replay.writeSegment":
-                SessionReplayManager.get().writeExternalSegment(
-                        payload.getString("segment"), payload.getString("viewId"));
-                return null;
-            case "replay.setRecordCount":
-                SessionReplayManager.get().setExternalRecordCount(
-                        payload.getString("viewId"), payload.getLong("count"));
-                return null;
-            case "replay.stop":
-                return null;
             default:
                 throw new IllegalArgumentException("Unknown bridge method: " + method);
         }
@@ -225,35 +135,12 @@ public final class FTCocosBridge {
         if (hasText(json, "sdkVersion")) {
             FTSdk.appendGlobalContext(COCOS_SDK_VERSION_KEY, json.getString("sdkVersion"));
         }
-        if (json.optBoolean("requiresReplay", false)) hybridRecorderSwitchMethod();
     }
 
     private static void ensureNativeHostInitialized() {
         if (FTSdk.get() == null) {
             throw new IllegalStateException(
                     "The native host must install the native SDK before FTCocosSDK.attach()");
-        }
-    }
-
-    private static Method hybridRecorderSwitchMethod() {
-        try {
-            return SessionReplayManager.class.getMethod(
-                    "setExternalRecorderActive", boolean.class);
-        } catch (NoSuchMethodException error) {
-            throw new IllegalStateException(
-                    "Android Session Replay does not support Hybrid recorder switching; "
-                            + "upgrade the Native SDK");
-        }
-    }
-
-    private static void setExternalRecorderActive(boolean active) throws Exception {
-        ensureNativeHostInitialized();
-        try {
-            hybridRecorderSwitchMethod().invoke(SessionReplayManager.get(), active);
-        } catch (InvocationTargetException error) {
-            Throwable cause = error.getCause();
-            if (cause instanceof Exception) throw (Exception) cause;
-            throw error;
         }
     }
 
@@ -340,20 +227,6 @@ public final class FTCocosBridge {
         FTSdk.initTraceWithConfig(config);
     }
 
-    private static void configureReplay(JSONObject json) throws Exception {
-        FTSessionReplayConfig config = new FTSessionReplayConfig();
-        if (json.has("sampleRate")) config.setSampleRate((float) json.getDouble("sampleRate"));
-        if (json.has("sessionOnErrorSampleRate")) config.setSessionReplayOnErrorSampleRate((float) json.getDouble("sessionOnErrorSampleRate"));
-        if ("show".equals(json.optString("touchPrivacy"))) config.setTouchPrivacy(TouchPrivacy.SHOW);
-        config.setInternalCallback(new SessionReplayInternalCallback() {
-            @Override public Activity getCurrentActivity() { return resolveActivity(); }
-        });
-        Method externalMode = FTSessionReplayConfig.class.getDeclaredMethod("setExternalRecorderMode", boolean.class);
-        externalMode.setAccessible(true);
-        externalMode.invoke(config, true);
-        FTSdk.initSessionReplayConfig(config);
-    }
-
     private static void addResource(JSONObject payload) throws Exception {
         JSONObject content = payload.getJSONObject("content");
         ResourceParams params = new ResourceParams();
@@ -381,58 +254,6 @@ public final class FTCocosBridge {
             status.sslEndTime = metric(metrics, "sslEndTime");
         }
         FTRUMGlobalManager.get().addResource(payload.getString("key"), params, status);
-    }
-
-    private static String saveReplayImage(JSONObject json) throws Exception {
-        byte[] bytes = readFile(new File(json.getString("path")));
-        return SessionReplayManager.get().saveFlutterImageResource(bytes, json.getInt("width"), json.getInt("height"));
-    }
-
-    private static Object saveReplayImageV2(JSONObject json) throws Exception {
-        byte[] bytes = readFile(new File(json.getString("path")));
-        Method method;
-        try {
-            method = SessionReplayManager.class.getMethod(
-                    "saveExternalImageResourceV2",
-                    byte[].class,
-                    int.class,
-                    int.class,
-                    float.class,
-                    int.class);
-        } catch (NoSuchMethodException unavailable) {
-            throw new IllegalArgumentException("Unknown bridge method: replay.saveImageV2");
-        }
-        try {
-            return method.invoke(
-                    SessionReplayManager.get(),
-                    bytes,
-                    json.getInt("width"),
-                    json.getInt("height"),
-                    (float) json.optDouble("quality", 0.45),
-                    json.optInt("maxFrameBytes", 40 * 1024));
-        } catch (InvocationTargetException error) {
-            Throwable cause = error.getCause();
-            if (cause instanceof Exception) throw (Exception) cause;
-            throw error;
-        }
-    }
-
-    private static Activity resolveActivity() {
-        String[] classNames = {"com.cocos.lib.CocosActivity", "org.cocos2dx.lib.Cocos2dxActivity"};
-        String[] methodNames = {"getContext", "getActivity"};
-        for (String className : classNames) {
-            for (String methodName : methodNames) {
-                try {
-                    Object value = Class.forName(className).getMethod(methodName).invoke(null);
-                    if (value instanceof Activity) return (Activity) value;
-                    if (value instanceof Context && ((Context) value).getApplicationContext() instanceof Activity) {
-                        return (Activity) ((Context) value).getApplicationContext();
-                    }
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-        return null;
     }
 
     private static TraceType traceType(String value) {
@@ -521,16 +342,5 @@ public final class FTCocosBridge {
         return json.has(name) ? json.optLong(name, -1) : -1;
     }
 
-    private static byte[] readFile(File file) throws Exception {
-        FileInputStream input = new FileInputStream(file);
-        try {
-            ByteArrayOutputStream output = new ByteArrayOutputStream((int) Math.min(file.length(), Integer.MAX_VALUE));
-            byte[] buffer = new byte[16 * 1024];
-            int read;
-            while ((read = input.read(buffer)) >= 0) output.write(buffer, 0, read);
-            return output.toByteArray();
-        } finally {
-            input.close();
-        }
-    }
+
 }

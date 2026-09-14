@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "main": "../dist/creator3/creator3/index.js",
+  "types": "../dist/creator3/creator3/index.d.ts"
+}

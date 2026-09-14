@@ -1,6 +1,6 @@
 {
   "name": "@truewatchtech/cocos-sdk",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.7",
   "description": "Observability SDK integration for Cocos Creator 2.4 and 3.x",
   "license": "Apache-2.0",
   "author": "TrueWatch",
@@ -17,7 +17,6 @@
     "truewatch",
     "cocos-creator",
     "rum",
-    "session-replay",
     "observability"
   ],
   "exports": {
@@ -31,19 +30,25 @@
       "import": "./dist/creator3/creator3/index.js",
       "default": "./dist/creator3/creator3/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./plugin-api": {
+      "types": "./dist/creator2/core/plugin-api.d.ts",
+      "import": "./dist/creator3/core/plugin-api.js",
+      "require": "./dist/creator2/core/plugin-api.js",
+      "default": "./dist/creator2/core/plugin-api.js"
+    }
   },
   "files": [
     "creator2",
     "creator3",
     "dist",
-    "components",
     "extensions",
     "native",
     "bin",
     "README.md",
     "LICENSE",
-    "THIRD_PARTY_NOTICES"
+    "THIRD_PARTY_NOTICES",
+    "plugin-api"
   ],
   "bin": {
     "truewatch-cocos": "bin/cli.cjs"

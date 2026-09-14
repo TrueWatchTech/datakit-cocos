@@ -1,9 +1,4 @@
 import { FTLogger, FTMobileAgent, FTRUM, FTSDKOwnership, FTTrace } from './modules.js';
-import {
-  FTSessionReplay,
-  type FTCanvasCapture,
-  type FTReplayPointerSource,
-} from './replay.js';
 import type { FTNativeTransport } from './transport.js';
 import type {
   FTAutoTrackingConfig,
@@ -16,6 +11,53 @@ import { FT_COCOS_SDK_VERSION } from './version.js';
 export interface FTAutoTrackingController {
   start(config: FTAutoTrackingConfig, viewName?: string): void;
   stop(): void;
+}
+
+export interface FTSDKLifecycle {
+  /**
+   * Validates or prepares the extension before standalone native SDK initialization.
+   * Throwing aborts startup before the base SDK is initialized.
+   */
+  beforeStart?(): void;
+  /**
+   * Starts the extension after the base SDK and configured modules initialize,
+   * but before Cocos automatic tracking starts. If this hook throws, the native
+   * SDK remains initialized; startup is not automatically rolled back.
+   */
+  afterStart?(): void;
+  /**
+   * Prepares the extension before the native Hybrid attachment call.
+   * The native host already owns SDK initialization at this point.
+   */
+  beforeAttach?(): void;
+  /**
+   * Undoes extension preparation if beforeAttach or the native attachment call
+   * fails. Must tolerate partial preparation; errors from this hook are ignored
+   * so the original attachment error can be rethrown.
+   */
+  rollbackAttach?(): void;
+  /**
+   * Starts extension activity when entering Cocos in Hybrid mode, before Cocos
+   * automatic tracking starts. A failure triggers the leave hook for cleanup.
+   */
+  enter?(): void;
+  /**
+   * Stops extension activity when leaving Cocos in Hybrid mode, after automatic
+   * tracking cleanup is attempted. Also runs if entering Cocos fails, so it must
+   * tolerate partial startup. The native host SDK must remain running.
+   */
+  leave?(): void;
+  /**
+   * Releases standalone extension resources after automatic tracking cleanup is
+   * attempted and before the base native SDK shuts down. Base SDK shutdown is
+   * still attempted if this hook throws. Not called for Hybrid applications.
+   */
+  shutdown?(): void;
+}
+
+export interface FTSDKExtension<T> {
+  value: T;
+  lifecycle: FTSDKLifecycle;
 }
 
 type FTCocosSDKState = 'idle' | 'standalone' | 'hybrid-attached' | 'hybrid-entered';
@@ -33,8 +75,9 @@ export class FTCocosSDK {
   readonly logger: FTLogger;
   /** Distributed-tracing operations. */
   readonly trace: FTTrace;
-  /** Session Replay operations. */
-  readonly replay: FTSessionReplay;
+  readonly extensionProtocol = 1;
+  private extension: FTSDKExtension<unknown> | undefined;
+  private extensionId: string | undefined;
 
   private state: FTCocosSDKState = 'idle';
   private hybridAutoTracking: FTAutoTrackingConfig = {};
@@ -42,15 +85,29 @@ export class FTCocosSDK {
 
   constructor(
     private readonly transport: FTNativeTransport,
-    capture: FTCanvasCapture,
     private readonly autoTracking?: FTAutoTrackingController,
-    pointerSource?: FTReplayPointerSource,
+    readonly engine: 'creator2' | 'creator3' = 'creator3',
   ) {
     this.mobile = new FTMobileAgent(transport, this.ownership);
     this.rum = new FTRUM(transport, this.ownership);
     this.logger = new FTLogger(transport, this.ownership);
     this.trace = new FTTrace(transport, this.ownership);
-    this.replay = new FTSessionReplay(transport, capture, pointerSource);
+  }
+
+  /** Attaches an optional package before SDK initialization. */
+  registerExtension<T>(id: string, version: string, engine: string, factory: () => FTSDKExtension<T>): T {
+    if (version !== FT_COCOS_SDK_VERSION || engine !== this.engine) {
+      throw new Error('SDK extension version or Creator engine does not match the base SDK');
+    }
+    if (this.extension) {
+      if (id !== this.extensionId) throw new Error('A different SDK extension is already installed');
+      return this.extension.value as T;
+    }
+    if (this.state !== 'idle') throw new Error('Install SDK extensions before start() or attach()');
+    const extension = factory();
+    this.extension = extension;
+    this.extensionId = id;
+    return extension.value;
   }
 
   /**
@@ -65,9 +122,11 @@ export class FTCocosSDK {
    * @throws If the SDK is already started or attached.
    */
   start(config: FTCocosConfig): void {
+    rejectReplayConfig(config);
     if (this.state !== 'idle') {
       throw new Error('start() and attach() are mutually exclusive');
     }
+    this.extension?.lifecycle.beforeStart?.();
     this.mobile.start(config.sdk);
     // Base SDK installation already belongs to this Cocos runtime after the
     // first bridge call succeeds, even if a later optional module fails.
@@ -75,7 +134,7 @@ export class FTCocosSDK {
     if (config.rum) this.rum.start(config.rum);
     if (config.logger) this.logger.start(config.logger);
     if (config.trace) this.trace.start(config.trace);
-    if (config.replay) this.replay.start(config.replay);
+    this.extension?.lifecycle.afterStart?.();
     if (config.autoTrack) this.autoTracking?.start(config.autoTrack);
   }
 
@@ -86,10 +145,11 @@ export class FTCocosSDK {
    * Call this once before the first {@link enterCocos}. This method does not
    * initialize or shut down the native SDK.
    *
-   * @param config - Cocos tracking and replay settings owned by the native host.
+   * @param config - Cocos tracking settings for the SDK owned by the native host.
    * @throws If standalone initialization has already started.
    */
   attach(config: FTCocosHybridConfig = {}): void {
+    rejectReplayConfig(config);
     if (this.state === 'standalone') {
       throw new Error('start() and attach() are mutually exclusive');
     }
@@ -97,13 +157,12 @@ export class FTCocosSDK {
 
     this.ownership.claimNativeHost();
     try {
-      this.replay.attachHybrid(config.replay);
+      this.extension?.lifecycle.beforeAttach?.();
       this.transport.invoke('hybrid.attach', {
-        requiresReplay: config.replay !== undefined,
         sdkVersion: FT_COCOS_SDK_VERSION,
       });
     } catch (error) {
-      this.replay.detachHybrid();
+      try { this.extension?.lifecycle.rollbackAttach?.(); } catch { /* Preserve attachment error. */ }
       this.ownership.releaseNativeHost();
       throw error;
     }
@@ -112,7 +171,7 @@ export class FTCocosSDK {
   }
 
   /**
-   * Starts Cocos automatic tracking and canvas replay capture in Hybrid mode.
+   * Starts Cocos automatic tracking and registered extensions in Hybrid mode.
    *
    * @param options - Options for the Cocos view being entered.
    * @throws If {@link attach} has not been called, or if `viewName` is omitted
@@ -133,13 +192,13 @@ export class FTCocosSDK {
     }
 
     try {
-      this.replay.enterHybrid();
+      this.extension?.lifecycle.enter?.();
       this.autoTracking?.start(this.hybridAutoTracking, viewName);
       this.state = 'hybrid-entered';
     } catch (error) {
-      this.autoTracking?.stop();
+      try { this.autoTracking?.stop(); } catch { /* Preserve the entry error. */ }
       try {
-        this.replay.leaveHybrid();
+        this.extension?.lifecycle.leave?.();
       } catch {
         // Preserve the error that prevented entering Cocos.
       }
@@ -148,7 +207,7 @@ export class FTCocosSDK {
   }
 
   /**
-   * Stops Cocos automatic tracking and canvas replay capture in Hybrid mode.
+   * Stops Cocos automatic tracking and registered extensions in Hybrid mode.
    * The native host SDK remains running.
    */
   leaveCocos(): void {
@@ -157,9 +216,12 @@ export class FTCocosSDK {
     }
     if (this.state === 'idle' || this.state === 'hybrid-attached') return;
 
-    this.autoTracking?.stop();
-    this.replay.leaveHybrid();
-    this.state = 'hybrid-attached';
+    try {
+      this.autoTracking?.stop();
+    } finally {
+      this.extension?.lifecycle.leave?.();
+      this.state = 'hybrid-attached';
+    }
   }
 
   /**
@@ -173,13 +235,23 @@ export class FTCocosSDK {
       throw new Error('The native host owns the native SDK; call leaveCocos() instead of shutdown()');
     }
     if (this.state === 'idle') return;
-    this.autoTracking?.stop();
-    this.replay.stop();
-    this.mobile.shutdown();
-    this.state = 'idle';
+    let failure: unknown;
+    const cleanup = (operation: () => void): void => {
+      try { operation(); } catch (error) { if (failure === undefined) failure = error; }
+    };
+    cleanup(() => this.autoTracking?.stop());
+    cleanup(() => this.extension?.lifecycle.shutdown?.());
+    cleanup(() => { this.mobile.shutdown(); this.state = 'idle'; });
+    if (failure !== undefined) throw failure;
   }
 }
 
 function nonEmptyText(value: string | undefined): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+function rejectReplayConfig(config: object): void {
+  if ('replay' in config) {
+    throw new Error('Session Replay requires @truewatchtech/cocos-session-replay. Install the package and use withSessionReplay() before passing replay configuration.');
+  }
 }

@@ -10,4 +10,14 @@
 *.log
 
 # Installed by npm run sdk:install; preserve generated .meta files on reinstall.
-/assets/truewatch-cocos-sdk/
+/assets/*-cocos-sdk/
+
+# Generated from the common acceptance game by npm run game:sync.
+/assets/acceptance-game/
+/assets/acceptance-game.meta
+/assets/resources/starport-sfx/
+/assets/resources/starport-sfx.meta
+
+/assets/truewatch-cocos-sdk.meta
+/cocos-sdk.config.json
+/build-web/

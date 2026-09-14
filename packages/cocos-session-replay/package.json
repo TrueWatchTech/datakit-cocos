@@ -1,0 +1,58 @@
+{
+  "name": "@truewatchtech/cocos-session-replay",
+  "version": "0.1.0-alpha.7",
+  "description": "Optional Session Replay for the TrueWatch Cocos Creator SDK",
+  "license": "Apache-2.0",
+  "author": "TrueWatch",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TrueWatchTech/datakit-cocos.git",
+    "directory": "packages/cocos-session-replay"
+  },
+  "homepage": "https://github.com/TrueWatchTech/datakit-cocos#readme",
+  "bugs": {
+    "url": "https://github.com/TrueWatchTech/datakit-cocos/issues"
+  },
+  "keywords": [
+    "truewatch",
+    "cocos-creator",
+    "session-replay"
+  ],
+  "exports": {
+    "./creator2": {
+      "types": "./dist/creator2/creator2/index.d.ts",
+      "require": "./dist/creator2/creator2/index.js",
+      "default": "./dist/creator2/creator2/index.js"
+    },
+    "./creator3": {
+      "types": "./dist/creator3/creator3/index.d.ts",
+      "import": "./dist/creator3/creator3/index.js",
+      "default": "./dist/creator3/creator3/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "creator2",
+    "creator3",
+    "dist",
+    "components",
+    "native",
+    "native-integration.json",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "cocosSdk": {
+    "creator2": "2.4.5-2.4.15",
+    "creator3": "3.6.3-3.8.x"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@truewatchtech/cocos-sdk": "0.1.0-alpha.7"
+  }
+}

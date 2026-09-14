@@ -139,7 +139,22 @@ describe('Complete Hybrid Creator sample projects', () => {
       '--build-root', build,
     ];
     execFileSync(process.execPath, argumentsList, { cwd: process.cwd(), stdio: 'pipe' });
+    // Creator may serialize an empty game activity as a self-closing XML element.
+    const manifestPath = path.join(build, 'android/app/AndroidManifest.xml');
+    writeFileSync(manifestPath, readFileSync(manifestPath, 'utf8').replace(
+      /(<activity\b[^>]*android:name="(?:com.cocos.game.AppActivity|org.cocos2dx.javascript.AppActivity)"[^>]*)>\s*<\/activity>/,
+      '$1/>',
+    ));
     execFileSync(process.execPath, argumentsList, { cwd: process.cwd(), stdio: 'pipe' });
+
+    const cmake = readFileSync(path.join(build, 'android/CMakeLists.txt'), 'utf8');
+    if (creator === 3) {
+      expect(count(cmake, 'COCOS_HYBRID_ANDROID_PAGE_ALIGNMENT_BEGIN')).toBe(1);
+      expect(cmake).toContain('-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384');
+      expect(cmake.indexOf('set_property(TARGET')).toBeGreaterThan(cmake.indexOf('add_library('));
+    } else {
+      expect(cmake).not.toContain('PAGE_ALIGNMENT');
+    }
 
     const activity = readFileSync(path.join(build, 'android/app/src/AppActivity.java'), 'utf8');
     const appDelegate = readFileSync(path.join(build, 'ios/AppDelegate.mm'), 'utf8');
@@ -155,7 +170,7 @@ describe('Complete Hybrid Creator sample projects', () => {
     expect(gradle).toContain("apply plugin: 'ft-plugin'");
     expect(gradle).toContain("implementation 'com.squareup.okhttp3:okhttp:4.5.0'");
     expect(rootGradle).toContain(
-      "classpath 'com.truewatch.ft.mobile.sdk.tracker.plugin:ft-plugin:1.3.8'",
+      "classpath 'com.truewatch.ft.mobile.sdk.tracker.plugin:ft-plugin:1.3.9-alpha01'",
     );
     expect(manifest).toContain('android:name="com.truewatch.cocos.sample.HybridSampleNativeActivity"');
     expect(manifest).toContain('android:name="com.truewatch.cocos.sample.HybridSampleApplication"');
@@ -174,6 +189,7 @@ describe('Complete Hybrid Creator sample projects', () => {
     expect(count(gradle, 'COCOS_HYBRID_SAMPLE_BEGIN')).toBe(1);
     expect(count(rootGradle, 'COCOS_HYBRID_FT_PLUGIN_CLASSPATH_BEGIN')).toBe(1);
     expect(count(manifest, 'COCOS_HYBRID_NATIVE_PAGE_BEGIN')).toBe(1);
+    expect(count(manifest, 'android:name="com.truewatch.cocos.sample.HybridSampleNativeActivity"')).toBe(1);
     expect(count(podfile, 'COCOS_HYBRID_SAMPLE_BEGIN')).toBe(1);
   });
 });
@@ -206,6 +222,7 @@ function writeFixture(
   ].join('\n'));
   write(path.join(build, 'android/settings.gradle'), "rootProject.name = 'Sample'\n");
   write(path.join(build, 'android/app/build.gradle'), 'android {}\n');
+  write(path.join(build, 'android/CMakeLists.txt'), 'set(CC_LIB_NAME cocos)\nadd_library(${CC_LIB_NAME} SHARED ${CC_ALL_SOURCES})\n');
   write(path.join(build, 'android/app/AndroidManifest.xml'), [
     '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
     '  <application>',

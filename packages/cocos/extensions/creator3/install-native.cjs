@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { syncManagedDirectory } = require('./managed-assets.cjs');
 
 const BEGIN = '/* COCOS_SDK_BEGIN */';
 const END = '/* COCOS_SDK_END */';
@@ -22,19 +23,38 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   buildRoot = path.resolve(buildRoot);
   extensionRoot = path.resolve(extensionRoot);
   if (!fs.existsSync(buildRoot)) return;
+  const dependencyManager = readIosDependencyManager(buildRoot, extensionRoot);
   const nativeSource = path.join(extensionRoot, 'native');
   if (!fs.existsSync(nativeSource)) {
     logger.warn(`[cocos-sdk] Native bridge not found at ${nativeSource}`);
     return;
   }
-  const buildNative = path.join(buildRoot, 'cocos-sdk-native');
-  copyDirectory(nativeSource, buildNative);
-  const files = findFiles(buildRoot, 7);
-  const replayHeader = path.join(buildNative, 'shared', 'FTReplayFileBridge.h');
-  if (fs.existsSync(replayHeader)) {
-    findReplayEntryFiles(files)
-      .forEach((file) => patchReplayFileBridge(file, replayHeader));
+  const replayDescriptor = path.join(extensionRoot, 'replay-integration.json');
+  const replay = fs.existsSync(replayDescriptor) ? JSON.parse(fs.readFileSync(replayDescriptor, 'utf8')) : null;
+  const installedFile = path.join(extensionRoot, 'sdk-integration.json');
+  const installed = fs.existsSync(installedFile) ? JSON.parse(fs.readFileSync(installedFile, 'utf8')) : null;
+  if (installed?.replay && !replay) throw new Error('[cocos-sdk] Replay assets are missing. Run truewatch-cocos install --replay.');
+  if (replay && (replay.schemaVersion !== 1 || !installed || replay.baseVersion !== installed.version || replay.version !== installed.version || replay.iosSdkVersion !== '1.6.8-alpha.5')) {
+    throw new Error('[cocos-sdk] Replay native integration version does not match the base SDK. Reinstall matching packages.');
   }
+  const replaySource = path.join(extensionRoot, 'replay-native');
+  const buildNative = path.join(buildRoot, 'cocos-sdk-native');
+  const sources = [{ root: nativeSource }];
+  if (replay) sources.push({ root: replaySource, prefix: 'replay/' });
+  if (dependencyManager === 'spm') {
+    sources.push({ root: path.join(nativeSource, 'ios'), prefix: 'FTCocosBridge/' });
+    if (replay) sources.push({ root: path.join(replaySource, 'ios'), prefix: 'FTCocosReplayBridge/' });
+  }
+  const modules = 'android/src/main/java/com/ft/sdk/cocos/FTCocosBridgeModules.java';
+  const dispatcher = fs.readFileSync(path.join(nativeSource, modules), 'utf8');
+  const configuredDispatcher = replay ? dispatcher.replace(
+    '        return "{',
+    '        if ("session-replay".equals(endpoint)) return FTCocosReplayBridge.invokeLocal(method, payload);\n        return "{',
+  ) : dispatcher;
+  syncManagedDirectory(buildNative, sources, { [modules]: configuredDispatcher });
+  const files = findFiles(buildRoot, 7);
+  const replayHeader = replay ? path.join(buildNative, 'replay', 'shared', 'FTReplayFileBridge.h') : null;
+  findReplayEntryFiles(files).forEach(file => patchReplayFileBridge(file, replayHeader));
   const gradlePropertiesFiles = files.filter((file) => path.basename(file) === 'gradle.properties');
   const gradleFiles = uniqueFiles([
     ...files.filter((file) => /(?:^|\/)app\/build\.gradle$/.test(normalize(file))),
@@ -47,7 +67,10 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   const iosApplicationProjects = xcodeProjects
     .map((projectFile) => ({ projectFile, target: findIosApplicationTarget(projectFile) }))
     .filter((project) => project.target);
-  if (podfiles.length === 0) {
+  if (dependencyManager === 'spm' && iosApplicationProjects.length > 0) {
+    migrateManagedPods(podfiles, logger);
+  }
+  if (dependencyManager === 'cocoapods' && podfiles.length === 0) {
     iosApplicationProjects.forEach(({ projectFile, target }) => {
       const projectDirectory = path.dirname(path.dirname(projectFile));
       const podfile = path.join(projectDirectory, 'Podfile');
@@ -57,12 +80,21 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   }
   iosApplicationProjects.forEach(({ projectFile, target }) => {
     patchCocos2IosConfiguration(projectFile, target);
+    if (dependencyManager === 'spm') {
+      const spm = require('./install-spm.cjs');
+      if (!replay) spm.removeSwiftPackages(projectFile, ['FTCocosReplayBridge']);
+      spm.installSwiftPackage(projectFile, path.join(buildNative, 'FTCocosBridge'), 'FTCocosBridge', target);
+      if (replay) spm.installSwiftPackage(projectFile, path.join(buildNative, 'FTCocosReplayBridge'), 'FTCocosReplayBridge', target);
+    } else if (fs.readFileSync(projectFile, 'utf8').includes('XCLocalSwiftPackageReference')
+      || fs.existsSync(path.join(path.dirname(projectFile), 'cocos-sdk-spm.json'))) {
+      require('./install-spm.cjs').removeSwiftPackages(projectFile);
+    }
   });
-  gradleFiles.forEach((file) => patchGradle(file, buildNative));
+  gradleFiles.forEach((file) => patchGradle(file, buildNative, replay));
   gradlePropertiesFiles.forEach(patchGradleProperties);
-  podfiles.forEach((file) => patchPodfile(file, buildNative));
+  if (dependencyManager === 'cocoapods') podfiles.forEach((file) => patchPodfile(file, buildNative, replay));
   logger.info(
-    `[cocos-sdk] Installed native bridge (${gradleFiles.length} Android, ${podfiles.length} iOS project files).`,
+    `[cocos-sdk] Installed native bridge (${gradleFiles.length} Android, ${dependencyManager === 'spm' ? iosApplicationProjects.length : podfiles.length} iOS project files; iOS: ${dependencyManager}).`,
   );
 }
 
@@ -75,6 +107,12 @@ function patchReplayFileBridge(file, header) {
   // Creator 3 shares Game.cpp across iOS/Android builds. Keep its include stable
   // when another platform's build directory is cleaned or regenerated.
   const sharedDirectory = path.join(path.dirname(file), 'cocos-sdk-replay');
+  if (!header) {
+    const next = original.replace(markedPattern(includeBegin, includeEnd), '').replace(markedPattern(initBegin, initEnd), '');
+    if (fs.existsSync(sharedDirectory)) syncManagedDirectory(sharedDirectory, []);
+    if (next !== original) fs.writeFileSync(file, next);
+    return;
+  }
   const include = `${includeBegin}\n#include "cocos-sdk-replay/FTReplayFileBridge.h"\n${includeEnd}`;
   const init = `${initBegin}\n    ft_cocos::installReplayFileBridge();\n    ${initEnd}\n    `;
   let next = original;
@@ -90,7 +128,7 @@ function patchReplayFileBridge(file, header) {
   next = markedPattern(includeBegin, includeEnd).test(next)
     ? next.replace(markedPattern(includeBegin, includeEnd), include)
     : `${include}\n${next}`;
-  copyDirectory(path.dirname(header), sharedDirectory);
+  syncManagedDirectory(sharedDirectory, [{ root: path.dirname(header) }]);
   if (next !== original) fs.writeFileSync(file, next);
 }
 
@@ -241,34 +279,37 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function patchGradle(file, nativeRoot) {
+function patchGradle(file, nativeRoot, replay) {
   const javaDir = normalize(path.join(nativeRoot, 'android', 'src', 'main', 'java'));
+  const javaDirs = [javaDir];
+  if (replay) javaDirs.push(normalize(path.join(nativeRoot, 'replay', 'android', 'src', 'main', 'java')));
   replaceMarkedBlock(file, [
     BEGIN,
     'android {',
-    `    sourceSets { main.java.srcDirs += ['${escapeGroovy(javaDir)}'] }`,
+    `    sourceSets { main.java.srcDirs += [${javaDirs.map(dir => `'${escapeGroovy(dir)}'`).join(', ')}] }`,
     '}',
     'repositories {',
     "    maven { url 'https://mvnrepo.truewatch.com/repository/maven-releases' }",
     '}',
     'dependencies {',
-    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-sdk:1.7.6-alpha02'",
+    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-sdk:1.7.6-alpha03'",
     "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-native:1.1.3'",
-    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-session-replay:0.1.9-alpha03'",
+    ...(replay ? [`    implementation '${escapeGroovy(replay.androidReplay)}'`] : []),
     "    implementation 'com.google.code.gson:gson:2.10.1'",
     "    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')",
     "    implementation 'androidx.appcompat:appcompat:1.1.0'",
-    "    implementation 'androidx.fragment:fragment:1.8.0'",
+    ...(replay ? [`    implementation '${escapeGroovy(replay.androidFragment)}'`] : []),
     '}',
     END,
   ].join('\n'), BEGIN, END, [[LEGACY_BEGIN, LEGACY_END]]);
 }
 
-function patchPodfile(file, nativeRoot) {
+function patchPodfile(file, nativeRoot, replay) {
   const iosDir = normalize(path.join(nativeRoot, 'ios'));
   const block = [
     POD_BEGIN,
     `pod 'FTCocosBridge', :path => '${escapeRuby(iosDir)}'`,
+    ...(replay ? [`pod 'FTCocosReplayBridge', :path => '${escapeRuby(normalize(path.join(nativeRoot, 'replay', 'ios')))}'`] : []),
     POD_END,
   ].join('\n');
   const original = fs.readFileSync(file, 'utf8');
@@ -298,6 +339,11 @@ function replaceIndentedMarkedBlock(contents, begin, end, block) {
 
 function findIosApplicationTarget(projectFile) {
   const contents = fs.readFileSync(projectFile, 'utf8');
+  if (contents.includes('COCOS_SDK_XCODE_PROJECT')
+    || fs.existsSync(path.join(path.dirname(projectFile), 'cocos-sdk-spm.json'))) {
+    const { readProject, applicationTarget } = require('./install-spm.cjs');
+    return applicationTarget(readProject(projectFile))?.[1].name || null;
+  }
   const nativeTarget = /\/\* ([^*]+) \*\/ = \{\s*isa = PBXNativeTarget;([\s\S]*?)\n\s*\};/g;
   const targets = [];
   let match;
@@ -352,16 +398,6 @@ function markedPattern(begin, end) {
   return new RegExp(`${escapeRegExp(begin)}[\\s\\S]*?${escapeRegExp(end)}`, 'm');
 }
 
-function copyDirectory(source, destination) {
-  fs.mkdirSync(destination, { recursive: true });
-  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-    const from = path.join(source, entry.name);
-    const to = path.join(destination, entry.name);
-    if (entry.isDirectory()) copyDirectory(from, to);
-    else fs.copyFileSync(from, to);
-  }
-}
-
 function findFiles(root, maxDepth) {
   const result = [];
   function visit(directory, depth) {
@@ -382,4 +418,58 @@ function escapeGroovy(value) { return value.replace(/\\/g, '\\\\').replace(/'/g,
 function escapeRuby(value) { return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-module.exports = { installNative };
+function readIosDependencyManager(buildRoot, extensionRoot) {
+  for (const start of [buildRoot, extensionRoot]) {
+    let directory = path.resolve(start);
+    while (true) {
+      const file = path.join(directory, 'cocos-sdk.config.json');
+      if (fs.existsSync(file)) {
+        const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const manager = config.ios?.dependencyManager ?? 'cocoapods';
+        if (!['spm', 'cocoapods'].includes(manager)) {
+          throw new Error(`[cocos-sdk] Invalid ios.dependencyManager in ${file}: expected spm or cocoapods.`);
+        }
+        return manager;
+      }
+      const parent = path.dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  }
+  return 'cocoapods';
+}
+
+function migrateManagedPods(podfiles, logger) {
+  for (const file of podfiles) {
+    const original = fs.readFileSync(file, 'utf8');
+    let next = original;
+    for (const [begin, end] of [
+      [POD_BEGIN, POD_END], [LEGACY_POD_BEGIN, LEGACY_POD_END], [LEGACY_BEGIN, LEGACY_END],
+      ['# COCOS_HYBRID_SAMPLE_BEGIN', '# COCOS_HYBRID_SAMPLE_END'],
+    ]) next = next.replace(markedPattern(begin, end), '');
+    if (/^\s*pod\s+['"](?:FTCocosBridge|FTCocosReplayBridge|HybridSampleHost|TrueWatchSDK)(?:\/[^'"]*)?['"]/m.test(next)) {
+      throw new Error(`[cocos-sdk] Remove the manually declared native SDK Pod from ${file} before switching to SPM.`);
+    }
+    if (next !== original) fs.writeFileSync(file, next);
+    const directory = path.dirname(file);
+    const existingLock = path.join(directory, 'Podfile.lock');
+    const hasSDKPods = fs.existsSync(existingLock)
+      && /^\s*- (?:FTCocosBridge|FTCocosReplayBridge|HybridSampleHost|TrueWatchSDK)(?:\/|\s|:)/m.test(fs.readFileSync(existingLock, 'utf8'));
+    if (next === original && !hasSDKPods) continue;
+    if (fs.existsSync(path.join(directory, 'Podfile.lock')) || fs.existsSync(path.join(directory, 'Pods'))) {
+      logger.info('[cocos-sdk] Updating existing Pods integration for the SPM switch.');
+      try {
+        execFileSync('pod', ['install'], { cwd: directory, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+      } catch (error) {
+        fs.writeFileSync(file, original);
+        throw new Error(`[cocos-sdk] Unable to update existing Pods in ${directory}: ${error.message}`);
+      }
+      const lock = path.join(directory, 'Podfile.lock');
+      if (fs.existsSync(lock) && /^\s*- TrueWatchSDK(?:\/|\s|:)/m.test(fs.readFileSync(lock, 'utf8'))) {
+        throw new Error(`[cocos-sdk] Another Pod still depends on the native SDK in ${lock}; migrate that dependency before using SPM.`);
+      }
+    }
+  }
+}
+
+module.exports = { installNative, readIosDependencyManager };

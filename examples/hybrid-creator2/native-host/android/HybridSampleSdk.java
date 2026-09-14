@@ -51,6 +51,7 @@ public final class HybridSampleSdk {
                 .setEnableTraceUserAction(true)
                 .setEnableTraceUserView(true)
                 .setEnableTraceUserResource(true)
+                .setEnableHttpURLConnectionResource(true)
                 .setViewActivityTrackingHandler(activity -> nativeView(activity))
                 .setEnableTrackAppANR(true)
                 .setEnableTrackAppCrash(true)

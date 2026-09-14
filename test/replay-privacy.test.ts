@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectPrivacyBounds } from '../src/core/replay-privacy';
+import { projectPrivacyBounds } from '../src/session-replay/core/replay-privacy';
 
 describe('Replay privacy projection', () => {
   it('projects centered world coordinates into a top-left-origin Replay frame', () => {

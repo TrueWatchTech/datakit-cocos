@@ -1,4 +1,4 @@
-#include "../../native/shared/FTReplayFileWorker.h"
+#include "../../src/session-replay/native/shared/FTReplayFileWorker.h"
 #include <cassert>
 #include <fstream>
 #include <iterator>
