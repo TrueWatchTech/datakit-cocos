@@ -46,9 +46,19 @@ export interface FTRUMConfig {
   androidAppId?: string;
   /** iOS RUM application ID. */
   iosAppId?: string;
-  /** Session sampling rate from `0` to `1`. */
+  /** Session sampling percentage from `0` to `100`. Supports decimals. @defaultValue `100` */
+  sessionSamplingRate?: number;
+  /**
+   * Session sampling rate from `0` to `1`.
+   * @deprecated Use {@link sessionSamplingRate}. This field keeps its original unit and behavior.
+   */
   sampleRate?: number;
-  /** Additional replay sampling rate from `0` to `1` for sessions that contain errors. */
+  /** Additional session sampling percentage from `0` to `100` for sessions that contain errors. Supports decimals. @defaultValue `0` */
+  sessionOnErrorSamplingRate?: number;
+  /**
+   * Additional session sampling rate from `0` to `1` for sessions that contain errors.
+   * @deprecated Use {@link sessionOnErrorSamplingRate}. This field keeps its original unit and behavior.
+   */
   sessionOnErrorSampleRate?: number;
   /** Enables native user-action tracking. */
   enableNativeUserAction?: boolean;
@@ -79,7 +89,12 @@ export type FTLogLevel = 'info' | 'warning' | 'error' | 'critical' | 'ok' | stri
 
 /** Logger configuration. */
 export interface FTLoggerConfig {
-  /** Log sampling rate from `0` to `1`. */
+  /** Log sampling percentage from `0` to `100`. Supports decimals. @defaultValue `100` */
+  logSamplingRate?: number;
+  /**
+   * Log sampling rate from `0` to `1`.
+   * @deprecated Use {@link logSamplingRate}. This field keeps its original unit and behavior.
+   */
   sampleRate?: number;
   /** Associates logs with the current RUM session. */
   enableLinkRumData?: boolean;
@@ -108,7 +123,12 @@ export type FTTraceType =
 
 /** Distributed-tracing configuration. */
 export interface FTTraceConfig {
-  /** Trace sampling rate from `0` to `1`. */
+  /** Trace sampling percentage from `0` to `100`. Supports decimals. @defaultValue `100` */
+  traceSamplingRate?: number;
+  /**
+   * Trace sampling rate from `0` to `1`.
+   * @deprecated Use {@link traceSamplingRate}. This field keeps its original unit and behavior.
+   */
   sampleRate?: number;
   /** Header propagation format. */
   traceType?: FTTraceType;
@@ -170,7 +190,11 @@ export interface FTAutoTrackingConfig {
   errors?: boolean;
   /** Sends supported console output to the SDK logger. */
   console?: boolean;
-  /** Tracks supported network requests as RUM resources and traces. */
+  /**
+   * Tracks supported network requests as RUM resources and traces. In Hybrid
+   * mode, starts at attach() and stays active until detach(), including outside
+   * Cocos pages. In standalone mode, follows start()/shutdown().
+   */
   network?: boolean;
 }
 

@@ -1,5 +1,5 @@
 import { FTLogger, FTRUM, FTTrace } from './modules.js';
-import type { FTAutoTrackingController } from './client.js';
+import type { FTAutoTrackingController, FTAutoTrackingScope } from './client.js';
 import type { FTAutoTrackingConfig, FTAttributes } from './types.js';
 
 export interface FTEngineTrackingHooks {
@@ -17,6 +17,7 @@ interface FTGlobalWithFetch {
 
 export class FTDefaultAutoTracking implements FTAutoTrackingController {
   private stops: Array<() => void> = [];
+  private networkStops: Array<() => void> = [];
   private activeView: string | undefined;
 
   constructor(
@@ -27,25 +28,40 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
     private readonly target: FTGlobalWithFetch = globalThis,
   ) {}
 
-  start(config: FTAutoTrackingConfig, viewName?: string): void {
-    this.stop();
-    if (viewName) this.switchView(viewName);
-    if (config.scenes) this.installSceneTracking(viewName === undefined);
-    if (config.actions) this.installActionTracking();
-    if (config.errors) this.installErrorTracking();
-    if (config.console) this.installConsoleTracking();
-    if (config.network) {
-      this.installFetchTracking();
-      this.installXhrTracking();
+  start(config: FTAutoTrackingConfig, viewName?: string, scope: FTAutoTrackingScope = 'all'): void {
+    this.stop(scope);
+    try {
+      if (scope !== 'network') {
+        if (viewName) this.switchView(viewName);
+        if (config.scenes) this.installSceneTracking(viewName === undefined);
+        if (config.actions) this.installActionTracking();
+        if (config.errors) this.installErrorTracking();
+        if (config.console) this.installConsoleTracking();
+      }
+      if (scope !== 'page' && config.network) {
+        this.installFetchTracking();
+        this.installXhrTracking();
+      }
+    } catch (error) {
+      try { this.stop(scope); } catch { /* Preserve the installation error. */ }
+      throw error;
     }
   }
 
-  stop(): void {
-    this.stops.splice(0).reverse().forEach((stop) => stop());
-    if (this.activeView) {
-      this.rum.stopView();
-      this.activeView = undefined;
+  stop(scope: FTAutoTrackingScope = 'all'): void {
+    let failure: unknown;
+    const cleanup = (stop: () => void): void => {
+      try { stop(); } catch (error) { if (failure === undefined) failure = error; }
+    };
+    if (scope !== 'page') this.networkStops.splice(0).reverse().forEach(cleanup);
+    if (scope !== 'network') {
+      this.stops.splice(0).reverse().forEach(cleanup);
+      if (this.activeView) {
+        cleanup(() => this.rum.stopView());
+        this.activeView = undefined;
+      }
     }
+    if (failure !== undefined) throw failure;
   }
 
   private installSceneTracking(includeCurrent: boolean): void {
@@ -154,10 +170,10 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
         throw error;
       }
     }) as typeof fetch;
-    this.target.fetch = tracked;
-    this.stops.push(() => {
+    this.networkStops.push(() => {
       this.target.fetch = original;
     });
+    this.target.fetch = tracked;
   }
 
   private installXhrTracking(): void {
@@ -170,15 +186,20 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
     const rum = this.rum;
     const trace = this.trace;
 
+    // Register each restore before assignment so partial installation can roll back.
+    this.networkStops.push(() => { Xhr.prototype.open = open; });
+
     Xhr.prototype.open = function trackedOpen(this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]): void {
       metadata.set(this, { key: resourceKey(), method, url: String(url), headers: {} });
       (open as (...args: unknown[]) => void).call(this, method, url, ...rest);
     } as typeof open;
+    this.networkStops.push(() => { Xhr.prototype.setRequestHeader = setRequestHeader; });
     Xhr.prototype.setRequestHeader = function trackedHeader(this: XMLHttpRequest, name: string, value: string): void {
       const data = metadata.get(this);
       if (data) data.headers[name] = value;
       setRequestHeader.call(this, name, value);
     };
+    this.networkStops.push(() => { Xhr.prototype.send = send; });
     Xhr.prototype.send = function trackedSend(this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null): void {
       const data = metadata.get(this);
       if (!data) return send.call(this, body);
@@ -188,32 +209,38 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
       });
       const started = nowNs();
       rum.startResource(data.key);
-      this.addEventListener(
-        'loadend',
-        () => {
-          const ended = nowNs();
-          rum.stopResource(data.key);
-          rum.addResource(
-            data.key,
-            {
-              url: data.url,
-              httpMethod: data.method,
-              requestHeaders: data.headers,
-              responseHeaders: parseXhrHeaders(this.getAllResponseHeaders()),
-              statusCode: this.status,
-            },
-            { fetchStartTime: started, responseStartTime: ended, responseEndTime: ended },
-          );
-        },
-        { once: true },
-      );
+      let completed = false;
+      const report = (): void => {
+        if (completed) return;
+        completed = true;
+        const ended = nowNs();
+        rum.stopResource(data.key);
+        rum.addResource(
+          data.key,
+          {
+            url: data.url,
+            httpMethod: data.method,
+            requestHeaders: data.headers,
+            responseHeaders: parseXhrHeaders(this.getAllResponseHeaders()),
+            statusCode: this.status,
+          },
+          { fetchStartTime: started, responseStartTime: ended, responseEndTime: ended },
+        );
+      };
+      const originalLoadEnd = this.onloadend;
+      this.addEventListener('loadend', report, { once: true });
+      // Creator 2 JSB implements addEventListener by assigning the on* property.
+      // Preserve the business handler there; DOM runtimes already keep both listeners.
+      if (this.onloadend === report) {
+        const xhr = this;
+        const handler: NonNullable<XMLHttpRequest['onloadend']> = function (event): void {
+          if (xhr.onloadend === handler) xhr.onloadend = originalLoadEnd;
+          try { originalLoadEnd?.call(xhr, event); } finally { report(); }
+        };
+        this.onloadend = handler;
+      }
       send.call(this, body);
     };
-    this.stops.push(() => {
-      Xhr.prototype.open = open;
-      Xhr.prototype.send = send;
-      Xhr.prototype.setRequestHeader = setRequestHeader;
-    });
   }
 }
 

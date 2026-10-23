@@ -19,9 +19,21 @@ export const sdk = withSessionReplay(baseSdk);
 sdk.start({
   sdk: { datakitUrl: 'http://localhost:9529' },
   rum: { androidAppId: 'your-app-id', iosAppId: 'your-app-id' },
-  replay: { captureFps: 1, touchPrivacy: 'hide' },
+  replay: {
+    sessionReplaySamplingRate: 20,
+    sessionReplayOnErrorSamplingRate: 100,
+    captureFps: 1,
+    touchPrivacy: 'hide',
+  },
 });
 ```
+
+The Replay sampling fields accept percentages from `0` to `100`, including decimals.
+The default Replay percentage follows the native Replay SDK, and the error-Replay default
+is 0. The deprecated `sampleRate` and `sessionOnErrorSampleRate` fields retain their original
+`0` to `1` unit. Percentage fields take precedence when both forms are supplied. Fractional
+percentages require floating-point support in the installed native SDK; older integer-only
+iOS SDKs fail explicitly instead of rounding.
 
 For Creator 2, use the `/creator2` entry from both packages. Compose before starting or attaching the base SDK. `sdk.setReplayCamera(camera)` selects the capture camera; `sdk.replay.setPrivacy(node, 'mask')` protects a node. The installer places `ReplayPrivacy.ts` under `assets/truewatch-cocos-sdk` for scene/prefab use.
 

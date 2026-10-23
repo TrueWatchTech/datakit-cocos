@@ -170,7 +170,7 @@ describe('Complete Hybrid Creator sample projects', () => {
     expect(gradle).toContain("apply plugin: 'ft-plugin'");
     expect(gradle).toContain("implementation 'com.squareup.okhttp3:okhttp:4.5.0'");
     expect(rootGradle).toContain(
-      "classpath 'com.truewatch.ft.mobile.sdk.tracker.plugin:ft-plugin:1.3.9-alpha01'",
+      "classpath 'com.truewatch.ft.mobile.sdk.tracker.plugin:ft-plugin:1.3.9'",
     );
     expect(manifest).toContain('android:name="com.truewatch.cocos.sample.HybridSampleNativeActivity"');
     expect(manifest).toContain('android:name="com.truewatch.cocos.sample.HybridSampleApplication"');

@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.1.0
+
+Initial stable release for native Android and iOS applications built with Cocos Creator.
+
+### Features
+
+- **RUM collection**: Support automatic scene, touch, JavaScript error, and runtime-supported unhandled Promise rejection tracking, plus manual View, Action, Error, Long Task, and Resource instrumentation. Configure native crash, Android ANR, UI blocking, and device performance monitoring.
+- **Log collection**: Submit custom logs or capture Console output, with level filters, sampling, cache policies, and RUM session correlation.
+- **Network monitoring and tracing**: Collect request and response metadata and total duration for runtime-provided `fetch` and `XMLHttpRequest`, and inject trace headers. Support manual Resource tracking and trace header generation for custom network integrations. DNS, TCP, and SSL timing breakdowns require manual instrumentation.
+- **Optional Session Replay**: Provide `@truewatchtech/cocos-session-replay` with Creator 2 and Creator 3 entry points. Compose it with the base SDK through `withSessionReplay(baseSdk)` to capture Cocos visuals and associate them with RUM sessions, with configurable sampling, error-session sampling, capture frequency, and image dimensions.
+- **Replay privacy and image controls**: Mask or hide nodes through the `ReplayPrivacy` component or code; input fields are masked and touch positions are hidden by default. Configure image quality presets and opt into per-image byte limits with `imagePolicy.maxFrameBytes`. Limits cover every image, including new-view and rotation frames, and do not impose a rolling traffic quota.
+- **Native-host Hybrid integration**: Reuse the SDK initialized by the native host through `truewatchSdk.attach()`. Use `truewatchSdk.enterCocos()` and `truewatchSdk.leaveCocos()` to switch Cocos page tracking and Replay capture. When enabled, Cocos network tracking starts on attachment and remains active across page transitions without shutting down the host SDK.
+- **Percentage sampling**: Configure RUM, error-session, log, trace, Replay, and error-Replay sampling with `sessionSamplingRate`, `sessionOnErrorSamplingRate`, `logSamplingRate`, `traceSamplingRate`, `sessionReplaySamplingRate`, and `sessionReplayOnErrorSamplingRate`. Values accept decimal percentages from `0` to `100`; legacy ratio fields retain their `0` to `1` behavior, and percentage fields take precedence, including an explicit `0`.
+- **User context and installation**: Bind users and add global or per-event custom attributes, with DataKit or DataWay reporting. Provide Creator 2 and Creator 3 installation commands and native build extensions, with CocoaPods or Swift Package Manager for iOS.
+
+### Improvements
+
+- **Replay capture performance**: Perform native image encoding and Replay file reads and writes off the game thread on Android and iOS. Include image processing time in the configured capture interval.
+
+### Integration Requirements
+
+- Supports Cocos Creator 2.4.5–2.4.15 and 3.6.3–3.8.x; 3.0–3.6.2 is supported on a best-effort basis. Requires Android API 21+ or iOS 15.0+. Web, mini-game, and desktop targets are not supported.
+- Uses Android Agent `1.7.6`, Android Session Replay `0.1.9`, and iOS Agent / Session Replay `1.6.8`. Swift Package Manager requires Swift tools 5.5 or later.
+- Use `truewatchSdk.start()` for standalone applications or `truewatchSdk.attach()` after native-host initialization for Hybrid applications. These modes are mutually exclusive; Hybrid sampling is configured by the native host.
+- For Replay, install `@truewatchtech/cocos-sdk` and `@truewatchtech/cocos-session-replay` at the exact same version and compose them before `start()` or `attach()`. Run `npx truewatch-cocos install --replay`, or `npx truewatch-cocos install --no-replay` for base-only applications, then regenerate the native project, resolve dependencies, and rebuild.
+
+## 0.1.0-alpha.8
+
+### Features
+
+- **Percentage sampling configuration**: Add `sessionSamplingRate`, `sessionOnErrorSamplingRate`, `logSamplingRate`, `traceSamplingRate`, `sessionReplaySamplingRate`, and `sessionReplayOnErrorSamplingRate`. The new fields accept decimal percentages from `0` to `100`. Deprecated ratio fields retain their original `0` to `1` behavior; new fields take precedence, including an explicit `0`.
+
+### Improvements
+
+- **Native SDK dependencies**: Upgrade iOS Agent and Session Replay to `1.6.8-alpha.11`, Android Agent to `1.7.6-alpha09`, Android Session Replay to `0.1.9-alpha07`, and the Hybrid sample's Gradle Plugin to `1.3.9-alpha02`. Synchronize CocoaPods, SPM, native installers, and Hybrid sample dependencies.
+- **Native percentage sampling**: Use the native percentage APIs for RUM, logging, tracing, and Session Replay. iOS now accepts fractional percentages such as `0.1` without integer rounding. Legacy ratio fields retain their existing conversion behavior.
+
+### Fixes
+
+- **Hybrid iOS sample resources**: Avoid duplicate native and Cocos collection for the Creator 3 sample's network requests.
+- **npm release completion**: Finish publishing after both package uploads succeed without waiting for npm registry visibility. Registry propagation delays no longer interrupt publication of the package pair; version and content conflict checks still run before uploading either package.
+
+### Migration
+
+- **Minimum iOS version is now 15.0**, as required by TrueWatchSDK `1.6.8-alpha.11`. SPM packages require Swift tools 5.5 or later. The installer raises lower generated deployment targets to iOS 15.0 and preserves higher targets. Applications that must support iOS 12–14 should remain on an earlier SDK release.
+- Upgrade `@truewatchtech/cocos-sdk` and `@truewatchtech/cocos-session-replay` together to `0.1.0-alpha.8`. Rerun `npx truewatch-cocos install --replay` for Replay integrations, or `npx truewatch-cocos install --no-replay` for base-only integrations, then regenerate and rebuild the native application. Resolve the updated CocoaPods or SPM dependencies before building iOS.
+- Prefer the new `0`–`100` percentage fields for new integrations. Existing `0`–`1` ratio fields remain supported; when both are supplied, the percentage field takes precedence.
+
 ## 0.1.0-alpha.7
 
 ### Improvements

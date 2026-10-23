@@ -13,10 +13,36 @@ TrueWatch Application Monitoring collects and analyzes RUM, Log, and Trace data 
 
 | Package entry | Supported Cocos Creator | Native targets |
 | --- | --- | --- |
-| `@truewatchtech/cocos-sdk/creator2` | 2.4.5–2.4.15 | Android API 21+, iOS 12+ |
-| `@truewatchtech/cocos-sdk/creator3` | 3.6.3–3.8.x | Android API 21+, iOS 12+ |
+| `@truewatchtech/cocos-sdk/creator2` | 2.4.5–2.4.15 | Android API 21+, iOS 15+ |
+| `@truewatchtech/cocos-sdk/creator3` | 3.6.3–3.8.x | Android API 21+, iOS 15+ |
 
 Cocos Creator 3.0–3.6.2 is supported on a best-effort basis because the stable native build extension API starts at 3.6.3. Web, mini-game, and desktop targets are not currently supported.
+
+## Sampling configuration
+
+Use the percentage-based sampling fields for new integrations. They accept finite values from
+`0` to `100`, including decimals such as `0.1` for 0.1%:
+
+```ts
+truewatchSdk.start({
+  sdk: { datakitUrl: 'http://localhost:9529' },
+  rum: {
+    androidAppId: 'your-app-id',
+    iosAppId: 'your-app-id',
+    sessionSamplingRate: 20,
+    sessionOnErrorSamplingRate: 100,
+  },
+  logger: { logSamplingRate: 50 },
+  trace: { traceSamplingRate: 25 },
+});
+```
+
+`sessionSamplingRate`, `logSamplingRate`, and `traceSamplingRate` default to 100 in the
+native SDK. `sessionOnErrorSamplingRate` defaults to 0. The deprecated `sampleRate` and
+`sessionOnErrorSampleRate` fields remain available with their original `0` to `1` unit.
+When both forms are supplied for the same setting, the percentage field wins, including
+an explicit value of `0`. Fractional percentages require a native SDK with floating-point
+sampling support; an older integer-only iOS SDK is rejected instead of rounding the value.
 
 ## Optional Session Replay
 

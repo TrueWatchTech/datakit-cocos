@@ -34,7 +34,7 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   const installedFile = path.join(extensionRoot, 'sdk-integration.json');
   const installed = fs.existsSync(installedFile) ? JSON.parse(fs.readFileSync(installedFile, 'utf8')) : null;
   if (installed?.replay && !replay) throw new Error('[cocos-sdk] Replay assets are missing. Run truewatch-cocos install --replay.');
-  if (replay && (replay.schemaVersion !== 1 || !installed || replay.baseVersion !== installed.version || replay.version !== installed.version || replay.iosSdkVersion !== '1.6.8-alpha.5')) {
+  if (replay && (replay.schemaVersion !== 1 || !installed || replay.baseVersion !== installed.version || replay.version !== installed.version || replay.iosSdkVersion !== '1.6.8')) {
     throw new Error('[cocos-sdk] Replay native integration version does not match the base SDK. Reinstall matching packages.');
   }
   const replaySource = path.join(extensionRoot, 'replay-native');
@@ -79,6 +79,7 @@ function installNative(buildRoot, extensionRoot, logger = console) {
     });
   }
   iosApplicationProjects.forEach(({ projectFile, target }) => {
+    patchIosDeploymentTarget(projectFile);
     patchCocos2IosConfiguration(projectFile, target);
     if (dependencyManager === 'spm') {
       const spm = require('./install-spm.cjs');
@@ -151,6 +152,17 @@ function findReplayEntryFiles(files) {
   return uniqueFiles(entries);
 }
 
+function patchIosDeploymentTarget(projectFile) {
+  const original = fs.readFileSync(projectFile, 'utf8');
+  const next = original.replace(
+    /(\bIPHONEOS_DEPLOYMENT_TARGET\s*=\s*"?)(\d+(?:\.\d+)*)("?\s*;)/g,
+    (line, prefix, version, suffix) => compareVersions(version, '15.0') < 0
+      ? `${prefix}15.0${suffix}`
+      : line,
+  );
+  if (next !== original) fs.writeFileSync(projectFile, next);
+}
+
 function patchCocos2IosConfiguration(projectFile, target) {
   const projectDirectory = path.dirname(path.dirname(projectFile));
   const iosDirectory = path.join(projectDirectory, 'ios');
@@ -174,17 +186,11 @@ function patchCocos2IosConfiguration(projectFile, target) {
   });
 
   const original = fs.readFileSync(projectFile, 'utf8');
-  let next = quoteWhitespaceProductNames(original).replace(
+  const next = quoteWhitespaceProductNames(original).replace(
     /(\b(?:HEADER|LIBRARY)_SEARCH_PATHS\s*=\s*)"([^"]*)";/g,
     (line, prefix, value) => value.includes('$(inherited)')
       ? line
       : `${prefix}"${`$(inherited) ${value}`.trim()}";`,
-  );
-  next = next.replace(
-    /(\bIPHONEOS_DEPLOYMENT_TARGET\s*=\s*)(\d+(?:\.\d+)*)(\s*;)/g,
-    (line, prefix, version, suffix) => compareVersions(version, '12.0') < 0
-      ? `${prefix}12.0${suffix}`
-      : line,
   );
   if (next !== original) fs.writeFileSync(projectFile, next);
 }
@@ -292,8 +298,8 @@ function patchGradle(file, nativeRoot, replay) {
     "    maven { url 'https://mvnrepo.truewatch.com/repository/maven-releases' }",
     '}',
     'dependencies {',
-    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-sdk:1.7.6-alpha03'",
-    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-native:1.1.3'",
+    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-sdk:1.7.6'",
+    "    implementation 'com.truewatch.ft.mobile.sdk.tracker.agent:ft-native:1.1.4'",
     ...(replay ? [`    implementation '${escapeGroovy(replay.androidReplay)}'`] : []),
     "    implementation 'com.google.code.gson:gson:2.10.1'",
     "    implementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')",
@@ -328,6 +334,14 @@ function patchPodfile(file, nativeRoot, replay) {
     next = targetPattern.test(original)
       ? original.replace(targetPattern, `$1\n  ${block.replace(/\n/g, '\n  ')}`)
       : `${original.replace(/\s*$/, '')}\n\n${block}\n`;
+  }
+  const platformPattern = /(^[ \t]*platform\s+:ios\s*,\s*['"])(\d+(?:\.\d+)*)(['"])/gm;
+  if (platformPattern.test(next)) {
+    next = next.replace(platformPattern, (line, prefix, version, suffix) => (
+      compareVersions(version, '15.0') < 0 ? `${prefix}15.0${suffix}` : line
+    ));
+  } else {
+    next = `platform :ios, '15.0'\n${next}`;
   }
   if (next !== original) fs.writeFileSync(file, next);
 }
@@ -368,7 +382,7 @@ function unquotePbxValue(value) {
 function createPodfile(file, projectFile, target) {
   const projectName = path.basename(path.dirname(projectFile));
   fs.writeFileSync(file, [
-    "platform :ios, '12.0'",
+    "platform :ios, '15.0'",
     `project '${escapeRuby(projectName)}'`,
     '',
     `target '${escapeRuby(target)}' do`,

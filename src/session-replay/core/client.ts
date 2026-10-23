@@ -2,7 +2,7 @@ import type { FTCocosSDK, FTNativeTransport, FTCocosEnterOptions } from '@truewa
 import { FTSessionReplay, type FTCanvasCapture, type FTReplayPointerSource } from './replay.js';
 import type { FTCocosReplayConfig, FTCocosHybridReplayConfig, FTSessionReplayConfig, FTHybridSessionReplayConfig } from './types.js';
 import { FT_COCOS_REPLAY_VERSION } from './version.js';
-import { replayImagePolicy, captureFps, samplingRate } from './validation.js';
+import { replayImagePolicy, captureFps, validatedReplaySamplingConfig } from './validation.js';
 
 export interface FTReplayCapture extends FTCanvasCapture { setCamera(camera: unknown): void; }
 
@@ -73,8 +73,9 @@ export class FTCocosReplaySDK {
   setReplayCamera(camera: unknown): void { this.capture.setCamera(camera); }
 
   /**
-   * Starts Cocos automatic tracking and any Replay capture enabled by
+   * Starts page automatic tracking and any Replay capture enabled by
    * {@link attach} in Hybrid mode. Repeated calls while entered have no effect.
+   * Network tracking is already active when enabled by attach().
    *
    * @param options - Options for the Cocos view being entered. Supply `viewName`
    * when automatic scene tracking is disabled.
@@ -84,14 +85,17 @@ export class FTCocosReplaySDK {
   enterCocos(options?: FTCocosEnterOptions): void { this.base.enterCocos(options); }
 
   /**
-   * Stops Cocos automatic tracking and Hybrid Replay capture while keeping the
-   * native host SDK running. Call {@link enterCocos} to resume Cocos tracking.
+   * Stops page automatic tracking and Hybrid Replay capture while keeping
+   * network tracking and the native host SDK running.
    * Has no effect before attachment or when Cocos has already been left.
    *
    * @throws If the SDK was started in standalone mode, or tracking or Replay
    * cleanup fails.
    */
   leaveCocos(): void { this.base.leaveCocos(); }
+
+  /** Removes Hybrid instrumentation, including network hooks, without shutting down the host SDK. */
+  detach(): void { this.base.detach(); }
 
   /**
    * Stops standalone Cocos tracking, Session Replay, and the base native SDK.
@@ -122,8 +126,7 @@ export function composeSessionReplay(
         beforeStart: () => {
           if (pending === undefined) return;
           validateConfig(pending);
-          samplingRate(pending.sampleRate, 'replay.sampleRate');
-          samplingRate(pending.sessionOnErrorSampleRate, 'replay.sessionOnErrorSampleRate');
+          validatedReplaySamplingConfig(pending);
           validateNativeReplay(transport, false);
         },
         afterStart: () => { if (pending !== undefined) replay.start(pending); },
@@ -137,6 +140,7 @@ export function composeSessionReplay(
         rollbackAttach: () => replay.detachHybrid(),
         enter: () => replay.enterHybrid(),
         leave: () => replay.leaveHybrid(),
+        detach: () => replay.detachHybrid(true),
         shutdown: () => replay.stop(),
       },
     };

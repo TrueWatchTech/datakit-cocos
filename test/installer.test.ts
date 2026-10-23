@@ -82,11 +82,12 @@ describe('native build integration', () => {
     const installer = readFileSync(resolve('integrations/shared/install-native.cjs'), 'utf8');
     const podspec = readFileSync(resolve('native/ios/FTCocosBridge.podspec'), 'utf8');
 
-    expect(installer).toContain('ft-sdk:1.7.6-alpha03');
-    expect(readFileSync('packages/cocos-session-replay/native-integration.json', 'utf8')).toContain('ft-session-replay:0.1.9-alpha03');
-    expect(podspec).toContain("s.dependency 'TrueWatchSDK/Agent', '1.6.8-alpha.5'");
+    expect(installer).toContain('ft-sdk:1.7.6');
+    expect(installer).toContain('ft-native:1.1.4');
+    expect(readFileSync('packages/cocos-session-replay/native-integration.json', 'utf8')).toContain('ft-session-replay:0.1.9');
+    expect(podspec).toContain("s.dependency 'TrueWatchSDK/Agent', '1.6.8'");
     expect(podspec).not.toContain("TrueWatchSDK/FTSessionReplay");
-    expect(readFileSync('src/session-replay/native/ios/FTCocosReplayBridge.podspec', 'utf8')).toContain("s.dependency 'TrueWatchSDK/FTSessionReplay', '1.6.8-alpha.5'");
+    expect(readFileSync('src/session-replay/native/ios/FTCocosReplayBridge.podspec', 'utf8')).toContain("s.dependency 'TrueWatchSDK/FTSessionReplay', '1.6.8'");
   });
 
   it('patches generated Gradle and Pod projects idempotently', () => {
@@ -124,7 +125,7 @@ describe('native build integration', () => {
     const podfileText = readFileSync(podfile, 'utf8');
     expect(gradleText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
     expect(gradleText).toContain('https://mvnrepo.truewatch.com/repository/maven-releases');
-    expect(gradleText).toContain('ft-session-replay:0.1.9-alpha03');
+    expect(gradleText).toContain('ft-session-replay:0.1.9');
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain("platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')");
     expect(gradlePropertiesText).toContain('PROP_COMPILE_SDK_VERSION=34');
@@ -133,6 +134,7 @@ describe('native build integration', () => {
     expect(gradlePropertiesText).toContain('PROP_BUILD_TOOLS_VERSION=34.0.0');
     expect(gradlePropertiesText).toContain('android.useAndroidX=true');
     expect(podfileText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
+    expect(podfileText).toContain("platform :ios, '15.0'");
     expect(podfileText).toContain("pod 'FTCocosBridge'");
     expect(podfileText).toContain("target 'Example-mobile' do\n  # COCOS_SDK_BEGIN");
     expect(podfileText).toContain("\n  pod 'FTCocosBridge'");
@@ -162,7 +164,7 @@ describe('native build integration', () => {
     installNative(buildRoot, extension, { info() {}, warn() {} });
 
     const gradleText = readFileSync(gradle, 'utf8');
-    expect(gradleText).toContain('ft-session-replay:0.1.9-alpha03');
+    expect(gradleText).toContain('ft-session-replay:0.1.9');
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain(join(
       buildRoot,
@@ -172,6 +174,35 @@ describe('native build integration', () => {
       'main',
       'java',
     ));
+  });
+
+  it.each(['12.0', '15.0', '16.2'])('aligns existing iOS %s projects with the SDK minimum without lowering higher targets', (version) => {
+    const root = mkdtempSync(join(tmpdir(), 'cocos-ios-minimum-'));
+    temporaryRoots.push(root);
+    const project = join(root, 'Example.xcodeproj');
+    mkdirSync(project);
+    const pbx = join(project, 'project.pbxproj');
+    writeFileSync(pbx, [
+      'A1 /* Example-mobile */ = {',
+      '  isa = PBXNativeTarget;',
+      '  name = "Example-mobile";',
+      '  productType = "com.apple.product-type.application";',
+      '};',
+      `IPHONEOS_DEPLOYMENT_TARGET = "${version}";`,
+    ].join('\n'));
+    const podfile = join(root, 'Podfile');
+    writeFileSync(podfile, `platform :ios, '${version}'\ntarget 'Example-mobile' do\nend\n`);
+    const extension = createReplayExtension(root);
+    const quiet = { info() {}, warn() {} };
+    installNative(root, extension, quiet);
+    const firstProject = readFileSync(pbx, 'utf8');
+    const firstPodfile = readFileSync(podfile, 'utf8');
+    installNative(root, extension, quiet);
+    const expected = Number(version) < 15 ? '15.0' : version;
+    expect(firstProject).toContain(`IPHONEOS_DEPLOYMENT_TARGET = "${expected}";`);
+    expect(firstPodfile).toContain(`platform :ios, '${expected}'`);
+    expect(readFileSync(pbx, 'utf8')).toBe(firstProject);
+    expect(readFileSync(podfile, 'utf8')).toBe(firstPodfile);
   });
 
   it('keeps the most specific Creator 3 build output as the native source root', async () => {
@@ -274,6 +305,7 @@ describe('native build integration', () => {
     expect(podfileText).toContain("target 'Example-mobile' do");
     expect(podfileText).not.toContain("target 'Example-desktop' do");
     expect(podfileText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
+    expect(podfileText).toContain("platform :ios, '15.0'");
     expect(podfileText).toContain("pod 'FTCocosBridge'");
     expect(readFileSync(join(iosConfigDirectory, 'UserConfigIOS.debug.xcconfig'), 'utf8'))
       .toContain('#include? "../Pods/Target Support Files/Pods-Example-mobile/Pods-Example-mobile.debug.xcconfig"');
@@ -282,7 +314,7 @@ describe('native build integration', () => {
     const projectText = readFileSync(join(xcodeProject, 'project.pbxproj'), 'utf8');
     expect(projectText).toContain('HEADER_SEARCH_PATHS = "$(inherited)";');
     expect(projectText).toContain('LIBRARY_SEARCH_PATHS = "$(inherited) /cocos/external/ios/libs";');
-    expect(projectText).toContain('IPHONEOS_DEPLOYMENT_TARGET = 12.0;');
+    expect(projectText).toContain('IPHONEOS_DEPLOYMENT_TARGET = 15.0;');
     expect(projectText).toContain('productName = "Example Product";');
     expect(projectText.match(/productName = "Example Product";/g) || []).toHaveLength(2);
   });
@@ -362,5 +394,6 @@ describe('native build integration', () => {
     expect(gradleText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
     expect(podfileText).not.toContain('FT_COCOS_SDK_BEGIN');
     expect(podfileText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
+    expect(podfileText).toContain("platform :ios, '15.0'");
   });
 });

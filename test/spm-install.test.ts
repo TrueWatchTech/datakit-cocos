@@ -75,6 +75,7 @@ describe.skipIf(process.platform !== 'darwin')('SPM Xcode integration', () => {
       expect(settings.OTHER_LDFLAGS).toContain('-lz');
       expect(settings.OTHER_LDFLAGS).toContain('-ObjC');
       expect(settings.CLANG_ENABLE_MODULES).toBe('YES');
+      expect(settings.IPHONEOS_DEPLOYMENT_TARGET).toBe('15.0');
     }
   });
 

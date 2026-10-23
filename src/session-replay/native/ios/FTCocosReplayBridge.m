@@ -41,8 +41,16 @@
     if ([method isEqualToString:@"replay.configure"]) {
         FTSessionReplayConfig *config = [[FTSessionReplayConfig alloc] init];
         [self ensureExternalReplayAPIForConfig:config];
-        if (arguments[@"sampleRate"]) config.sampleRate = [self percent:arguments[@"sampleRate"]];
-        if (arguments[@"sessionOnErrorSampleRate"]) config.sessionReplayOnErrorSampleRate = [self percent:arguments[@"sessionOnErrorSampleRate"]];
+        if (arguments[@"sessionReplaySamplingRate"]) {
+            config.sessionReplaySamplingRate = [self samplingPercentage:arguments[@"sessionReplaySamplingRate"] field:@"sessionReplaySamplingRate"];
+        } else if (arguments[@"sampleRate"]) {
+            config.sampleRate = [self percent:arguments[@"sampleRate"]];
+        }
+        if (arguments[@"sessionReplayOnErrorSamplingRate"]) {
+            config.sessionReplayOnErrorSamplingRate = [self samplingPercentage:arguments[@"sessionReplayOnErrorSamplingRate"] field:@"sessionReplayOnErrorSamplingRate"];
+        } else if (arguments[@"sessionOnErrorSampleRate"]) {
+            config.sessionReplayOnErrorSampleRate = [self percent:arguments[@"sessionOnErrorSampleRate"]];
+        }
         if ([[self text:arguments[@"touchPrivacy"]] isEqualToString:@"show"]) config.touchPrivacy = FTTouchPrivacyLevelShow;
         SEL externalMode = NSSelectorFromString(@"setExternalRecorderMode:");
         ((void (*)(id, SEL, BOOL))objc_msgSend)(config, externalMode, YES);
@@ -266,6 +274,14 @@
 
 + (int)percent:(NSNumber *)number {
     return (int)lround(MIN(1.0, MAX(0.0, number.doubleValue)) * 100.0);
+}
+
++ (float)samplingPercentage:(NSNumber *)number field:(NSString *)fieldName {
+    double percentage = number.doubleValue;
+    if (!isfinite(percentage) || percentage < 0.0 || percentage > 100.0) {
+        [self fail:[NSString stringWithFormat:@"%@ must be between 0 and 100", fieldName]];
+    }
+    return (float)percentage;
 }
 
 + (void)fail:(NSString *)message {

@@ -167,6 +167,22 @@ static __weak UIViewController *FTHybridNativePageController;
     rumConfig.enableTraceUserAction = YES;
     rumConfig.enableTraceUserView = YES;
     rumConfig.enableTraceUserResource = YES;
+    // Creator 3 XHR uses NSURLSession too. These sample URLs are reported by
+    // the Cocos automatic/manual collectors; native-page requests stay enabled.
+    rumConfig.resourceUrlHandler = ^BOOL(NSURL *url) {
+        NSArray<NSURLQueryItem *> *items = [NSURLComponents componentsWithURL:url
+                                                    resolvingAgainstBaseURL:NO].queryItems;
+        BOOL cocosSample = NO;
+        BOOL cocosCollection = NO;
+        for (NSURLQueryItem *item in items) {
+            if ([item.name isEqualToString:@"sample"] &&
+                [item.value isEqualToString:@"cocos-hybrid-creator3"]) cocosSample = YES;
+            if ([item.name isEqualToString:@"collection"] &&
+                ([item.value isEqualToString:@"automatic"] ||
+                 [item.value isEqualToString:@"manual"])) cocosCollection = YES;
+        }
+        return cocosSample && cocosCollection;
+    };
     rumConfig.enableTraceURLConnectionResource = FTHybridSampleURLConnectionEnabled;
     rumConfig.enableTrackAppCrash = YES;
     [rumConfig setEnableTrackAppFreeze:YES freezeDurationMs:100];

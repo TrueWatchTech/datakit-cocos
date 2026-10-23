@@ -10,7 +10,7 @@ import type {
   FTTraceConfig,
   FTUserData,
 } from './types.js';
-import { requireText, samplingRate } from './validation.js';
+import { requireText, validatedSamplingConfig } from './validation.js';
 import {
   FT_COCOS_SDK_BRIDGE_INFO,
   FT_COCOS_SDK_BRIDGE_INFO_KEY,
@@ -132,10 +132,12 @@ export class FTRUM {
    * @param config - RUM application IDs, sampling, and native tracking options.
    */
   start(config: FTRUMConfig): void {
-    samplingRate(config.sampleRate, 'rum.sampleRate');
-    samplingRate(config.sessionOnErrorSampleRate, 'rum.sessionOnErrorSampleRate');
+    const payload = validatedSamplingConfig(config, 'rum', [
+      ['sessionSamplingRate', 'sampleRate'],
+      ['sessionOnErrorSamplingRate', 'sessionOnErrorSampleRate'],
+    ]);
     this.ownership.claimStandalone();
-    this.transport.invoke('rum.configure', compact(config));
+    this.transport.invoke('rum.configure', compact(payload));
   }
 
   /**
@@ -289,9 +291,11 @@ export class FTLogger {
    * @param config - Logger sampling, filtering, and cache settings.
    */
   start(config: FTLoggerConfig): void {
-    samplingRate(config.sampleRate, 'logger.sampleRate');
+    const payload = validatedSamplingConfig(config, 'logger', [
+      ['logSamplingRate', 'sampleRate'],
+    ]);
     this.ownership.claimStandalone();
-    this.transport.invoke('logger.configure', compact(config));
+    this.transport.invoke('logger.configure', compact(payload));
   }
 
   /**
@@ -323,9 +327,11 @@ export class FTTrace {
    * @param config - Trace sampling and propagation settings.
    */
   start(config: FTTraceConfig): void {
-    samplingRate(config.sampleRate, 'trace.sampleRate');
+    const payload = validatedSamplingConfig(config, 'trace', [
+      ['traceSamplingRate', 'sampleRate'],
+    ]);
     this.ownership.claimStandalone();
-    this.transport.invoke('trace.configure', compact(config));
+    this.transport.invoke('trace.configure', compact(payload));
   }
 
   /**

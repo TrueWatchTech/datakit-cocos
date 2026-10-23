@@ -9,7 +9,6 @@
 #import "FTResourceMetricsModel.h"
 #import "FTResourceContentModel.h"
 #import <UIKit/UIKit.h>
-#import <objc/message.h>
 
 @implementation FTCocosBridge
 
@@ -78,8 +77,16 @@
         NSString *appID = [self text:arguments[@"iosAppId"]];
         if (appID.length == 0) [self fail:@"rum.iosAppId is required on iOS"];
         FTRumConfig *config = [[FTRumConfig alloc] initWithAppid:appID];
-        if (arguments[@"sampleRate"]) config.sampleRate = [self percent:arguments[@"sampleRate"]];
-        if (arguments[@"sessionOnErrorSampleRate"]) config.sessionOnErrorSampleRate = [self percent:arguments[@"sessionOnErrorSampleRate"]];
+        if (arguments[@"sessionSamplingRate"]) {
+            config.sessionSamplingRate = [self samplingPercentage:arguments[@"sessionSamplingRate"] field:@"sessionSamplingRate"];
+        } else if (arguments[@"sampleRate"]) {
+            config.sampleRate = [self percent:arguments[@"sampleRate"]];
+        }
+        if (arguments[@"sessionOnErrorSamplingRate"]) {
+            config.sessionOnErrorSamplingRate = [self samplingPercentage:arguments[@"sessionOnErrorSamplingRate"] field:@"sessionOnErrorSamplingRate"];
+        } else if (arguments[@"sessionOnErrorSampleRate"]) {
+            config.sessionOnErrorSampleRate = [self percent:arguments[@"sessionOnErrorSampleRate"]];
+        }
         if (arguments[@"enableNativeUserAction"]) config.enableTraceUserAction = [arguments[@"enableNativeUserAction"] boolValue];
         if (arguments[@"enableNativeUserView"]) config.enableTraceUserView = [arguments[@"enableNativeUserView"] boolValue];
         if (arguments[@"enableNativeUserResource"]) config.enableTraceUserResource = [arguments[@"enableNativeUserResource"] boolValue];
@@ -143,7 +150,11 @@
     }
     if ([method isEqualToString:@"logger.configure"]) {
         FTLoggerConfig *config = [[FTLoggerConfig alloc] init];
-        if (arguments[@"sampleRate"]) config.sampleRate = [self percent:arguments[@"sampleRate"]];
+        if (arguments[@"logSamplingRate"]) {
+            config.logSamplingRate = [self samplingPercentage:arguments[@"logSamplingRate"] field:@"logSamplingRate"];
+        } else if (arguments[@"sampleRate"]) {
+            config.sampleRate = [self percent:arguments[@"sampleRate"]];
+        }
         if (arguments[@"enableLinkRumData"]) config.enableLinkRumData = [arguments[@"enableLinkRumData"] boolValue];
         if (arguments[@"enableCustomLog"]) config.enableCustomLog = [arguments[@"enableCustomLog"] boolValue];
         if (arguments[@"printCustomLogToConsole"]) config.printCustomLogToConsole = [arguments[@"printCustomLogToConsole"] boolValue];
@@ -162,7 +173,11 @@
     }
     if ([method isEqualToString:@"trace.configure"]) {
         FTTraceConfig *config = [[FTTraceConfig alloc] init];
-        if (arguments[@"sampleRate"]) config.sampleRate = [self percent:arguments[@"sampleRate"]];
+        if (arguments[@"traceSamplingRate"]) {
+            config.traceSamplingRate = [self samplingPercentage:arguments[@"traceSamplingRate"] field:@"traceSamplingRate"];
+        } else if (arguments[@"sampleRate"]) {
+            config.sampleRate = [self percent:arguments[@"sampleRate"]];
+        }
         if (arguments[@"enableLinkRumData"]) config.enableLinkRumData = [arguments[@"enableLinkRumData"] boolValue];
         if (arguments[@"enableNativeAutoTrace"]) config.enableAutoTrace = [arguments[@"enableNativeAutoTrace"] boolValue];
         config.networkTraceType = [self traceType:[self text:arguments[@"traceType"]]];
@@ -242,6 +257,14 @@
 
 + (int)percent:(NSNumber *)number {
     return (int)lround(MIN(1.0, MAX(0.0, number.doubleValue)) * 100.0);
+}
+
++ (float)samplingPercentage:(NSNumber *)number field:(NSString *)fieldName {
+    double percentage = number.doubleValue;
+    if (!isfinite(percentage) || percentage < 0.0 || percentage > 100.0) {
+        [self fail:[NSString stringWithFormat:@"%@ must be between 0 and 100", fieldName]];
+    }
+    return (float)percentage;
 }
 
 + (FTLogStatus)logStatus:(NSString *)value {

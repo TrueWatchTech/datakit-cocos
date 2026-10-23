@@ -93,7 +93,7 @@ function installSwiftPackage(projectFile, packageDirectory, productName, targetN
       if (!/(?:^|\s)-ObjC(?:\s|$)/.test(flags || '')) add(parts, '-ObjC');
       settings.OTHER_LDFLAGS = parts.join(' ');
     }
-    if (Number(settings.IPHONEOS_DEPLOYMENT_TARGET || 0) < 12) settings.IPHONEOS_DEPLOYMENT_TARGET = '12.0';
+    if (Number(settings.IPHONEOS_DEPLOYMENT_TARGET || 0) < 15) settings.IPHONEOS_DEPLOYMENT_TARGET = '15.0';
     settings.CLANG_ENABLE_MODULES = 'YES';
   }
   preserveCmakeIntegration(projectFile, project, { packageDirectory, productName, targetName: target.name });

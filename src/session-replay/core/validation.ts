@@ -11,6 +11,32 @@ export function samplingRate(value: number | undefined, name: string): number | 
   return value;
 }
 
+export function samplingPercentage(value: number | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new RangeError(`${name} must be between 0 and 100`);
+  }
+  return value;
+}
+
+export function validatedReplaySamplingConfig<T extends object>(config: T): T {
+  const result = { ...config } as Record<string, unknown>;
+  const fields = [
+    ['sessionReplaySamplingRate', 'sampleRate'],
+    ['sessionReplayOnErrorSamplingRate', 'sessionOnErrorSampleRate'],
+  ] as const;
+  fields.forEach(([percentageField, legacyField]) => {
+    const percentage = result[percentageField] as number | undefined;
+    if (percentage !== undefined) {
+      samplingPercentage(percentage, `replay.${percentageField}`);
+      delete result[legacyField];
+      return;
+    }
+    samplingRate(result[legacyField] as number | undefined, `replay.${legacyField}`);
+  });
+  return result as T;
+}
+
 export function captureFps(value: number | undefined): number {
   const fps = value === undefined ? 1 : value;
   if (!Number.isInteger(fps) || fps < 1 || fps > 5) {

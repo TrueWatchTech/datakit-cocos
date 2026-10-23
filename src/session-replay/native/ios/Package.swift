@@ -1,12 +1,12 @@
-// swift-tools-version:5.3
+// swift-tools-version:5.5
 import PackageDescription
 
 let package = Package(
     name: "FTCocosReplayBridge",
-    platforms: [.iOS(.v12)],
+    platforms: [.iOS(.v15)],
     products: [.library(name: "FTCocosReplayBridge", targets: ["FTCocosReplayBridge"])],
     dependencies: [
-        .package(url: "https://github.com/TrueWatchTech/datakit-ios.git", .exact("1.6.8-alpha.5")),
+        .package(url: "https://github.com/TrueWatchTech/datakit-ios.git", .exact("1.6.8")),
     ],
     targets: [
         .target(

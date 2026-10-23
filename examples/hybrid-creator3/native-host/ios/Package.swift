@@ -1,9 +1,9 @@
-// swift-tools-version:5.3
+// swift-tools-version:5.5
 import PackageDescription
 
 let package = Package(
     name: "HybridSampleHost",
-    platforms: [.iOS(.v12)],
+    platforms: [.iOS(.v15)],
     products: [.library(name: "HybridSampleHost", targets: ["HybridSampleHost"])],
     // This package is staged beside cocos-sdk-native by native:install.
     dependencies: [.package(name: "FTCocosBridge", path: "../../cocos-sdk-native/FTCocosBridge")],

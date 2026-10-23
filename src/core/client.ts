@@ -8,9 +8,11 @@ import type {
 } from './types.js';
 import { FT_COCOS_SDK_VERSION } from './version.js';
 
+export type FTAutoTrackingScope = 'all' | 'page' | 'network';
+
 export interface FTAutoTrackingController {
-  start(config: FTAutoTrackingConfig, viewName?: string): void;
-  stop(): void;
+  start(config: FTAutoTrackingConfig, viewName?: string, scope?: FTAutoTrackingScope): void;
+  stop(scope?: FTAutoTrackingScope): void;
 }
 
 export interface FTSDKLifecycle {
@@ -47,6 +49,8 @@ export interface FTSDKLifecycle {
    * tolerate partial startup. The native host SDK must remain running.
    */
   leave?(): void;
+  /** Releases Hybrid extension bindings without shutting down the native host SDK. */
+  detach?(): void;
   /**
    * Releases standalone extension resources after automatic tracking cleanup is
    * attempted and before the base native SDK shuts down. Base SDK shutdown is
@@ -60,7 +64,7 @@ export interface FTSDKExtension<T> {
   lifecycle: FTSDKLifecycle;
 }
 
-type FTCocosSDKState = 'idle' | 'standalone' | 'hybrid-attached' | 'hybrid-entered';
+type FTCocosSDKState = 'idle' | 'standalone' | 'hybrid-attached' | 'hybrid-entered' | 'hybrid-detached';
 
 /**
  * Cocos SDK facade exposed through the platform entry point's SDK
@@ -143,7 +147,9 @@ export class FTCocosSDK {
    * native host application.
    *
    * Call this once before the first {@link enterCocos}. This method does not
-   * initialize or shut down the native SDK.
+   * initialize or shut down the native SDK. Network tracking starts here and
+   * remains active across page transitions until {@link detach}. Repeated calls
+   * while attached do not update configuration.
    *
    * @param config - Cocos tracking settings for the SDK owned by the native host.
    * @throws If standalone initialization has already started.
@@ -161,9 +167,17 @@ export class FTCocosSDK {
       this.transport.invoke('hybrid.attach', {
         sdkVersion: FT_COCOS_SDK_VERSION,
       });
+      if (config.autoTrack?.network) {
+        this.autoTracking?.start({ network: true }, undefined, 'network');
+      }
     } catch (error) {
+      try { this.autoTracking?.stop('network'); } catch { /* Preserve attachment error. */ }
       try { this.extension?.lifecycle.rollbackAttach?.(); } catch { /* Preserve attachment error. */ }
-      this.ownership.releaseNativeHost();
+      if (this.state === 'hybrid-detached') {
+        try { this.extension?.lifecycle.detach?.(); } catch { /* Preserve attachment error. */ }
+      } else {
+        this.ownership.releaseNativeHost();
+      }
       throw error;
     }
     this.hybridAutoTracking = { ...(config.autoTrack || {}) };
@@ -171,7 +185,8 @@ export class FTCocosSDK {
   }
 
   /**
-   * Starts Cocos automatic tracking and registered extensions in Hybrid mode.
+   * Starts page automatic tracking and registered extensions in Hybrid mode.
+   * Network tracking remains active independently of page visibility.
    *
    * @param options - Options for the Cocos view being entered.
    * @throws If {@link attach} has not been called, or if `viewName` is omitted
@@ -181,7 +196,7 @@ export class FTCocosSDK {
     if (this.state === 'standalone') {
       throw new Error('enterCocos() is only available after attach()');
     }
-    if (this.state === 'idle') {
+    if (this.state === 'idle' || this.state === 'hybrid-detached') {
       throw new Error('Call attach() before enterCocos()');
     }
     if (this.state === 'hybrid-entered') return;
@@ -193,10 +208,10 @@ export class FTCocosSDK {
 
     try {
       this.extension?.lifecycle.enter?.();
-      this.autoTracking?.start(this.hybridAutoTracking, viewName);
+      this.autoTracking?.start(this.hybridAutoTracking, viewName, 'page');
       this.state = 'hybrid-entered';
     } catch (error) {
-      try { this.autoTracking?.stop(); } catch { /* Preserve the entry error. */ }
+      try { this.autoTracking?.stop('page'); } catch { /* Preserve the entry error. */ }
       try {
         this.extension?.lifecycle.leave?.();
       } catch {
@@ -207,21 +222,42 @@ export class FTCocosSDK {
   }
 
   /**
-   * Stops Cocos automatic tracking and registered extensions in Hybrid mode.
-   * The native host SDK remains running.
+   * Stops page automatic tracking and registered extensions in Hybrid mode.
+   * Network tracking and the native host SDK remain running.
    */
   leaveCocos(): void {
     if (this.state === 'standalone') {
       throw new Error('leaveCocos() is only available after attach()');
     }
-    if (this.state === 'idle' || this.state === 'hybrid-attached') return;
+    if (this.state !== 'hybrid-entered') return;
 
     try {
-      this.autoTracking?.stop();
+      this.autoTracking?.stop('page');
     } finally {
       this.extension?.lifecycle.leave?.();
       this.state = 'hybrid-attached';
     }
+  }
+
+  /**
+   * Removes Hybrid page and network instrumentation without shutting down the
+   * native SDK. Requests already tracked may still finish reporting. Call attach()
+   * again to resume with new configuration; native SDK ownership stays with the host.
+   */
+  detach(): void {
+    if (this.state === 'standalone') throw new Error('detach() is only available after attach()');
+    if (this.state === 'idle' || this.state === 'hybrid-detached') return;
+    let failure: unknown;
+    const cleanup = (operation: () => void): void => {
+      try { operation(); } catch (error) { if (failure === undefined) failure = error; }
+    };
+    cleanup(() => this.leaveCocos());
+    cleanup(() => this.autoTracking?.stop());
+    // Keep the binding retryable if leaving failed (for example recorder restoration).
+    if (failure !== undefined) throw failure;
+    this.extension?.lifecycle.detach?.();
+    this.hybridAutoTracking = {};
+    this.state = 'hybrid-detached';
   }
 
   /**
@@ -231,7 +267,7 @@ export class FTCocosSDK {
    * native host owns SDK shutdown.
    */
   shutdown(): void {
-    if (this.state === 'hybrid-attached' || this.state === 'hybrid-entered') {
+    if (this.state === 'hybrid-attached' || this.state === 'hybrid-entered' || this.state === 'hybrid-detached') {
       throw new Error('The native host owns the native SDK; call leaveCocos() instead of shutdown()');
     }
     if (this.state === 'idle') return;

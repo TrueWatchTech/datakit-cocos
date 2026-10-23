@@ -108,8 +108,10 @@ public final class FTCocosReplayBridge {
 
     private static void configureReplay(JSONObject json) throws Exception {
         FTSessionReplayConfig config = new FTSessionReplayConfig();
-        if (json.has("sampleRate")) config.setSampleRate((float) json.getDouble("sampleRate"));
-        if (json.has("sessionOnErrorSampleRate")) config.setSessionReplayOnErrorSampleRate((float) json.getDouble("sessionOnErrorSampleRate"));
+        if (json.has("sessionReplaySamplingRate")) config.setSessionReplaySamplingRate(samplingPercentage(json, "sessionReplaySamplingRate"));
+        else if (json.has("sampleRate")) config.setSampleRate((float) json.getDouble("sampleRate"));
+        if (json.has("sessionReplayOnErrorSamplingRate")) config.setSessionReplayOnErrorSamplingRate(samplingPercentage(json, "sessionReplayOnErrorSamplingRate"));
+        else if (json.has("sessionOnErrorSampleRate")) config.setSessionReplayOnErrorSampleRate((float) json.getDouble("sessionOnErrorSampleRate"));
         if ("show".equals(json.optString("touchPrivacy"))) config.setTouchPrivacy(TouchPrivacy.SHOW);
         config.setInternalCallback(new SessionReplayInternalCallback() {
             @Override public Activity getCurrentActivity() { return FTBridgeTransport.resolveActivity(); }
@@ -118,6 +120,15 @@ public final class FTCocosReplayBridge {
         externalMode.setAccessible(true);
         externalMode.invoke(config, true);
         FTSdk.initSessionReplayConfig(config);
+    }
+
+    private static float samplingPercentage(JSONObject json, String key) throws Exception {
+        double percentage = json.getDouble(key);
+        if (Double.isNaN(percentage) || Double.isInfinite(percentage)
+                || percentage < 0d || percentage > 100d) {
+            throw new IllegalArgumentException(key + " must be between 0 and 100");
+        }
+        return (float) percentage;
     }
 
     private static String saveReplayImage(JSONObject json) throws Exception {

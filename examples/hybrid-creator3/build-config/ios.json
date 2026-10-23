@@ -33,7 +33,7 @@
         "iphoneos": true,
         "simulator": false
       },
-      "targetVersion": "12.0",
+      "targetVersion": "15.0",
       "__version__": "1.0.1"
     },
     "native": {

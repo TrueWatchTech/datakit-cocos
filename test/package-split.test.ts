@@ -114,6 +114,39 @@ describe('optional Replay lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(f.transport.calls.slice(-2)).toEqual(['replay.stop', 'sdk.shutdown']);
   });
+
+  it('detaches Replay, restores the recorder and can reattach without taking native ownership', () => {
+    vi.useFakeTimers();
+    const f = setup();
+    const sdk = f.compose();
+    sdk.attach({ replay: {} });
+    sdk.enterCocos({ viewName: 'Game' });
+    expect(vi.getTimerCount()).toBe(1);
+    sdk.detach();
+    sdk.detach();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(f.transport.calls.filter(call => call === 'hybrid.setExternalRecorderActive')).toHaveLength(2);
+    expect(f.transport.calls).not.toContain('replay.stop');
+    expect(f.transport.calls).not.toContain('sdk.shutdown');
+    expect(() => sdk.replay.start()).toThrow('Hybrid Replay');
+    expect(() => sdk.replay.stop()).toThrow('Hybrid Replay');
+
+    f.transport.fail = 'hybrid.attach';
+    expect(() => sdk.attach({ replay: {} })).toThrow('native failure');
+    expect(() => sdk.replay.start()).toThrow('Hybrid Replay');
+    expect(() => sdk.mobile.shutdown()).toThrow('native host');
+    f.transport.fail = undefined;
+    sdk.attach({ replay: {} });
+    sdk.enterCocos({ viewName: 'Game' });
+    expect(vi.getTimerCount()).toBe(1);
+    sdk.detach();
+    expect(vi.getTimerCount()).toBe(0);
+
+    sdk.attach();
+    sdk.enterCocos({ viewName: 'NoReplay' });
+    expect(vi.getTimerCount()).toBe(0);
+    sdk.detach();
+  });
 });
 
 function project() {

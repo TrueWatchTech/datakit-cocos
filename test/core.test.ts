@@ -130,7 +130,7 @@ describe('core bridge API', () => {
       method: 'sdk.configure',
       payload: {
         datakitUrl: 'http://127.0.0.1:9529',
-        globalContext: { sdk_package_cocos: '0.1.0-alpha.7' },
+        globalContext: { sdk_package_cocos: '0.1.0' },
       },
     });
   });
@@ -159,7 +159,7 @@ describe('core bridge API', () => {
     expect(attributes).toEqual({ feature: 'checkout' });
     transport.calls.forEach((call) => {
       expect((call.payload as { attributes: Record<string, string> }).attributes)
-        .toMatchObject({ sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' });
+        .toMatchObject({ sdk_bridge_info: '{"cocos":"0.1.0"}' });
     });
     expect((transport.calls[0]?.payload as { attributes: Record<string, string> }).attributes)
       .toMatchObject({ feature: 'checkout' });
@@ -203,7 +203,7 @@ describe('native host hybrid lifecycle', () => {
     expect(transport.calls).toEqual([
       {
         method: 'hybrid.attach',
-        payload: { sdkVersion: '0.1.0-alpha.7' },
+        payload: { sdkVersion: '0.1.0' },
       },
     ]);
     expect(autoTracking.starts).toEqual([
@@ -230,7 +230,7 @@ describe('native host hybrid lifecycle', () => {
         method: 'rum.startView',
         payload: {
           name: 'InitialCocosView',
-          attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' },
+          attributes: { sdk_bridge_info: '{"cocos":"0.1.0"}' },
         },
       },
     ]);
@@ -240,18 +240,18 @@ describe('native host hybrid lifecycle', () => {
     expect(transport.calls.slice(1)).toEqual([
       {
         method: 'rum.stopView',
-        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' } },
+        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0"}' } },
       },
       {
         method: 'rum.startView',
         payload: {
           name: 'NextScene',
-          attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' },
+          attributes: { sdk_bridge_info: '{"cocos":"0.1.0"}' },
         },
       },
       {
         method: 'rum.stopView',
-        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0-alpha.7"}' } },
+        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.0"}' } },
       },
     ]);
   });
@@ -270,7 +270,7 @@ describe('native host hybrid lifecycle', () => {
     expect(transport.calls.filter(call => call.method !== 'replay.capabilities').slice(0, 3)).toEqual([
       {
         method: 'hybrid.attach',
-        payload: { sdkVersion: '0.1.0-alpha.7' },
+        payload: { sdkVersion: '0.1.0' },
       },
       { method: 'hybrid.setExternalRecorderActive', payload: { active: true } },
       { method: 'hybrid.setExternalRecorderActive', payload: { active: false } },
