@@ -67,7 +67,7 @@ tracking normally inserted by `ft-plugin`. It also keeps an idempotent
 `HybridSampleSdk.start()` fallback in `AppActivity.onCreate`. On iOS it adds
 `[HybridSampleSDK start]` to `didFinishLaunchingWithOptions`. For Creator 3
 Android it makes `HybridSampleNativeActivity` the launcher, applies
-`ft-plugin:1.3.9-alpha01`, and adds the OkHttp dependency used by the native automatic
+`ft-plugin:1.3.9`, and adds the OkHttp dependency used by the native automatic
 network button. The native client deliberately uses
 `OkHttpClient.Builder().build()` so the plugin can inject Resource and Trace
 interceptors.

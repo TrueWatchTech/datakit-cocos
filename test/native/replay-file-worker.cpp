@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iterator>
 #include <chrono>
+#include <vector>
 
 static std::string wait(ft_cocos::ReplayFileWorker& worker) {
     for (int i = 0; i < 5000; ++i) {

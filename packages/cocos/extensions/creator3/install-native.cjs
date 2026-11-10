@@ -53,6 +53,14 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   ) : dispatcher;
   syncManagedDirectory(buildNative, sources, { [modules]: configuredDispatcher });
   const files = findFiles(buildRoot, 7);
+  const nativeEntries = files.filter(file => path.basename(file) === 'main.js'
+    && fs.existsSync(path.join(path.dirname(file), 'jsb-adapter')));
+  if (nativeEntries.length) {
+    const bootstrap = path.join(nativeSource, 'jsb-errors.js');
+    if (!fs.existsSync(bootstrap)) throw new Error('[cocos-sdk] JSB error bootstrap is missing. Reinstall the SDK before rebuilding.');
+    const source = fs.readFileSync(bootstrap, 'utf8');
+    nativeEntries.forEach(file => patchNativeErrorBootstrap(file, source));
+  }
   const replayHeader = replay ? path.join(buildNative, 'replay', 'shared', 'FTReplayFileBridge.h') : null;
   findReplayEntryFiles(files).forEach(file => patchReplayFileBridge(file, replayHeader));
   const gradlePropertiesFiles = files.filter((file) => path.basename(file) === 'gradle.properties');
@@ -97,6 +105,16 @@ function installNative(buildRoot, extensionRoot, logger = console) {
   logger.info(
     `[cocos-sdk] Installed native bridge (${gradleFiles.length} Android, ${dependencyManager === 'spm' ? iosApplicationProjects.length : podfiles.length} iOS project files; iOS: ${dependencyManager}).`,
   );
+}
+
+function patchNativeErrorBootstrap(file, source) {
+  const begin = '// COCOS_SDK_JSB_ERRORS_BEGIN';
+  const end = '// COCOS_SDK_JSB_ERRORS_END';
+  const original = fs.readFileSync(file, 'utf8');
+  const block = new RegExp(`^${escapeRegExp(begin)}\\r?\\n[\\s\\S]*?${escapeRegExp(end)}\\r?\\n`);
+  const body = original.replace(block, '');
+  const next = `${begin}\n${source.trim()}\n${end}\n${body}`;
+  if (next !== original) fs.writeFileSync(file, next);
 }
 
 function patchReplayFileBridge(file, header) {
@@ -486,4 +504,4 @@ function migrateManagedPods(podfiles, logger) {
   }
 }
 
-module.exports = { installNative, readIosDependencyManager };
+module.exports = { installNative, readIosDependencyManager, patchNativeErrorBootstrap };

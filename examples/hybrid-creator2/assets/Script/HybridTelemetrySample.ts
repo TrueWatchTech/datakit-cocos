@@ -1,9 +1,21 @@
+import { WebViewValidationScene } from './WebViewValidationScene';
+import { ReplayVersionDiffScene } from './ReplayVersionDiffScene';
+import { ReplayEvidenceScene } from './ReplayEvidenceScene';
+import { ReplayNativeScene } from './ReplayNativeScene';
+import { ReplayAssetScene } from './ReplayAssetScene';
+import { ReplayMotionScene } from './ReplayMotionScene';
+import { ReplayEffectsScene } from './ReplayEffectsScene';
+import { ReplayLayoutScene } from './ReplayLayoutScene';
+import { ReplayScrollScene } from './ReplayScrollScene';
+import { ReplayBasicScene } from './ReplayBasicScene';
+import { ReplayInputScene } from './ReplayInputScene';
 import StarportScene from './StarportScene';
 import ReplayPrivacy, { ReplayPrivacyMode } from '../truewatch-cocos-sdk/ReplayPrivacy';
 import { truewatchSdk as baseSdk } from '@truewatchtech/cocos-sdk/creator2';
 import { withSessionReplay } from '@truewatchtech/cocos-session-replay/creator2';
 
-const truewatchSdk = withSessionReplay(baseSdk);
+// Creator 2 evaluates scene scripts during export, before the native runtime exists.
+let truewatchSdk: ReturnType<typeof withSessionReplay>;
 
 const { ccclass } = cc._decorator;
 
@@ -34,6 +46,7 @@ let activeSample: HybridTelemetryRuntime | undefined;
 export default class HybridTelemetrySample extends cc.Component {
   start(): void {
     if (activeSample) return;
+    if (cc.sys.isNative) truewatchSdk = withSessionReplay(baseSdk);
     activeSample = new HybridTelemetryRuntime();
     activeSample.start();
   }
@@ -42,7 +55,7 @@ export default class HybridTelemetrySample extends cc.Component {
 /** Call this only when the native host removes or leaves the Cocos container. */
 export function leaveHybridCocos(): void {
   if (activeSample) activeSample.leaveCocosPage();
-  else truewatchSdk.leaveCocos();
+  else truewatchSdk?.leaveCocos();
 }
 
 interface UntrackedXhrMethods {
@@ -52,6 +65,7 @@ interface UntrackedXhrMethods {
 }
 
 class HybridTelemetryRuntime {
+  private inputCoverageNode?: cc.Node;
   private sampleRoot?: cc.Node;
   private gameNode?: cc.Node;
   private status?: cc.Label;
@@ -71,7 +85,7 @@ class HybridTelemetryRuntime {
   start(): void {
     const scene = this.createScene();
     this.replayCamera = scene.camera;
-    truewatchSdk.setReplayCamera(scene.camera);
+    truewatchSdk?.setReplayCamera(scene.camera);
     this.sampleRoot = scene.root;
     this.render(scene.root);
 
@@ -117,9 +131,8 @@ class HybridTelemetryRuntime {
   private enterCocosPage(): void {
     if (this.entered || this.entering) return;
     this.entering = true;
-    // Let Creator 2 present one main-framebuffer frame before Replay redirects
-    // the camera to a RenderTexture. This avoids an emulator restart race that
-    // can leave the screen black on a later Cocos process launch.
+    // Let Creator 2 present its first screen frame before starting Replay,
+    // including when the native host resumes a restarted Cocos process.
     cc.director.once(cc.Director.EVENT_AFTER_DRAW, () => {
       this.entering = false;
       if (this.entered) return;
@@ -138,6 +151,7 @@ class HybridTelemetryRuntime {
   }
 
   private emitRumAndLog(): void {
+    if (!cc.sys.isNative) { this.setStatus('Telemetry controls require an Android or iOS build.', COLORS.warning); return; }
     const attributes = { ...ATTRIBUTES, button: 'rum_log', emitted_at: Date.now() };
     truewatchSdk.rum.addAction('rum_log_clicked', 'click', attributes);
     truewatchSdk.logger.log('Creator 2 sample emitted a RUM Action and linked Log', 'info', attributes);
@@ -145,6 +159,7 @@ class HybridTelemetryRuntime {
   }
 
   private emitAutomaticResource(): void {
+    if (!cc.sys.isNative) { this.setStatus('Telemetry controls require an Android or iOS build.', COLORS.warning); return; }
     const url = `${AUTO_TEST_URL}&request_id=${Date.now().toString(36)}-${++this.resourceSequence}`;
     const attributes = { ...ATTRIBUTES, collection_mode: 'automatic', request_url: url };
     const request = new XMLHttpRequest();
@@ -169,6 +184,7 @@ class HybridTelemetryRuntime {
   }
 
   private emitManualTraceResource(): void {
+    if (!cc.sys.isNative) { this.setStatus('Telemetry controls require an Android or iOS build.', COLORS.warning); return; }
     const methods = this.untrackedXhr;
     if (!methods) {
       this.setStatus('Original XHR methods are unavailable for the manual sample', COLORS.danger);
@@ -229,6 +245,7 @@ class HybridTelemetryRuntime {
   }
 
   private emitError(): void {
+    if (!cc.sys.isNative) { this.setStatus('Telemetry controls require an Android or iOS build.', COLORS.warning); return; }
     const error = new Error('Creator 2 Hybrid sample diagnostic error');
     const attributes = { ...ATTRIBUTES, error_source: 'manual_button' };
     truewatchSdk.rum.addAction('error_clicked', 'click', attributes);
@@ -248,15 +265,15 @@ class HybridTelemetryRuntime {
       this.replayCard.fill();
     }
     const attributes = { ...ATTRIBUTES, replay_state: this.replayState };
-    truewatchSdk.rum.addAction('replay_state_changed', 'click', attributes);
-    truewatchSdk.logger.log(`Replay visual state changed to ${this.replayState}`, 'info', attributes);
+    if (this.entered) truewatchSdk.rum.addAction('replay_state_changed', 'click', attributes);
+    if (this.entered) truewatchSdk.logger.log(`Replay visual state changed to ${this.replayState}`, 'info', attributes);
     this.setStatus(`Replay visual state changed: ${this.replayState}`, color);
   }
 
   private toggleMaskFit(): void {
     this.maskShowAll = !this.maskShowAll;
     cc.view.setDesignResolutionSize(960, 640, this.maskShowAll ? cc.ResolutionPolicy.SHOW_ALL : cc.ResolutionPolicy.FIXED_HEIGHT);
-    truewatchSdk.rum.addAction('mask_fit_changed', 'click', { ...ATTRIBUTES, mask_scenario: this.maskShowAll ? 'show_all' : 'fixed_height' });
+    if (this.entered) truewatchSdk.rum.addAction('mask_fit_changed', 'click', { ...ATTRIBUTES, mask_scenario: this.maskShowAll ? 'show_all' : 'fixed_height' });
     this.setStatus('Mask fit changed: private targets stay masked; public guards stay visible', COLORS.primary);
   }
 
@@ -280,6 +297,7 @@ class HybridTelemetryRuntime {
   }
 
   private openNativePage(): void {
+    if (!cc.sys.isNative) { this.setStatus('Native page requires an Android or iOS build.', COLORS.warning); return; }
     try {
       this.leaveCocosPage();
       this.setStatus('Returning RUM View and Replay ownership to the native page…', COLORS.info);
@@ -289,6 +307,7 @@ class HybridTelemetryRuntime {
           'returnToNative',
           '()V',
         );
+        this.waitForNativeReturn();
         return;
       }
       if (cc.sys.os === cc.sys.OS_IOS) {
@@ -345,6 +364,9 @@ class HybridTelemetryRuntime {
     camera.ortho = true;
     camera.orthoSize = Math.max(320, cc.view.getVisibleSize().height / 2);
     camera.backgroundColor = COLORS.background;
+    // iOS preserves the drawable's color between frames. Clear the full camera
+    // viewport so resized UI and hidden profiler labels cannot leave trails.
+    camera.clearFlags |= cc.Camera.ClearFlags.COLOR;
 
     const canvasNode = new cc.Node('Canvas');
     canvasNode.setContentSize(960, 640);
@@ -382,7 +404,7 @@ class HybridTelemetryRuntime {
     this.label(componentHide, 'PRIVATE TOKEN\nHIDE-ME-2718', 0, 0, 170, 48, 15, COLORS.text);
     this.privacyMaskProbe = this.panel(replayNode, 'PrivacyMaskProbe', 230, 0, 180, 58, COLORS.danger, true);
     this.label(this.privacyMaskProbe, 'PRIVATE TOKEN\nMASK-ME-8391', 0, 0, 170, 48, 15, COLORS.text);
-    truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask');
+    truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'mask');
 
     // Guards are siblings: including them in a private subtree would mask them too.
     [-230, 0, 230].forEach((x, index) => {
@@ -408,7 +430,58 @@ class HybridTelemetryRuntime {
 
     const statusPanel = this.panel(root, 'StatusPanel', 0, -180, 780, 84, COLORS.panel);
     this.status = this.label(statusPanel, 'Preparing Hybrid integration…', 0, 0, 730, 50, 18, COLORS.muted);
+    this.button(root, 'InputCoverage', 'Inputs', -400, -300, 150, 32, () => this.openCoverage('input'), COLORS.info);
+    this.button(root, 'BasicCoverage', 'Basic', -240, -300, 150, 32, () => this.openCoverage('basic'), COLORS.info);
+    this.button(root, 'ScrollCoverage', 'Scroll', -80, -300, 150, 32, () => this.openCoverage('scroll'), COLORS.info);
+    this.button(root, 'LayoutCoverage', 'Layout', 80, -300, 150, 32, () => this.openCoverage('layout'), COLORS.info);
+    this.button(root, 'WebViewValidation', 'WebView', 370, 258, 170, 36, () => this.openCoverage('webview'), COLORS.info);
+    this.button(root, 'EffectsCoverage', 'Effects', 240, -300, 150, 32, () => this.openCoverage('effects'), COLORS.info);
+    this.button(root, 'MotionCoverage', 'Motion', 400, -300, 150, 32, () => this.openCoverage('motion'), COLORS.info);
+    this.button(root, 'VersionDiffCoverage', '2.4.x differences', -350, -180, 220, 26, () => this.openCoverage('version-diff'), COLORS.info);
+    this.button(root, 'EvidenceCoverage', 'Screenshot evidence', 350, -180, 230, 26, () => this.openCoverage('evidence'), COLORS.info);
+    this.button(root, 'NativeCoverage', 'Mesh + light + 3D skeleton', 0, -143, 450, 24, () => this.openCoverage('native'), COLORS.info);
+    this.button(root, 'AssetCoverage', 'Replay: tile + skeleton assets', 0, -222, 420, 30, () => this.openCoverage('assets'), COLORS.info);
     this.button(root, 'StarportGame', 'Open Starport Game', -160, -258, 360, 40, () => this.openGame(), COLORS.primary);
+  }
+
+  private async openCoverage(kind: 'webview' | 'input' | 'basic' | 'scroll' | 'layout' | 'effects' | 'motion' | 'assets' | 'native' | 'evidence' | 'version-diff'): Promise<void> {
+    if (this.inputCoverageNode || !this.sampleRoot) return;
+    const sampleRoot = this.sampleRoot;
+    const previousClearFlags = this.replayCamera && this.replayCamera.clearFlags;
+    // The 3D coverage page has no opaque full-screen UI panel.
+    if (kind === "native" && this.replayCamera) this.replayCamera.clearFlags = cc.Camera.ClearFlags.COLOR | cc.Camera.ClearFlags.DEPTH | cc.Camera.ClearFlags.STENCIL;
+    cc.view.setDesignResolutionSize(960, 640, cc.ResolutionPolicy.SHOW_ALL);
+    sampleRoot.active = false;
+    if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
+    const node = new cc.Node('ReplayCoverage');
+    sampleRoot.parent!.addChild(node);
+    this.inputCoverageNode = node;
+    const restore = (): void => {
+      if (this.inputCoverageNode !== node) return;
+      this.inputCoverageNode = undefined;
+      if (this.replayCamera && previousClearFlags !== undefined) this.replayCamera.clearFlags = previousClearFlags;
+      node.active = false;
+      node.destroy();
+      sampleRoot.children.slice().forEach(child => { child.active = false; child.destroy(); });
+      this.privacyLayoutMoved = false;
+      this.replayState = 0;
+      sampleRoot.active = true;
+      this.render(sampleRoot);
+      this.setStatus('Coverage closed · reopen to verify fresh state', COLORS.primary);
+      cc.view.setDesignResolutionSize(960, 640, this.maskShowAll ? cc.ResolutionPolicy.SHOW_ALL : cc.ResolutionPolicy.FIXED_HEIGHT);
+      truewatchSdk?.setReplayCamera(this.replayCamera);
+      if (this.entered) { truewatchSdk.rum.stopView(); truewatchSdk.rum.startView(VIEW_NAME, ATTRIBUTES); }
+    };
+    try {
+      if (this.entered) { truewatchSdk.rum.stopView(); truewatchSdk.rum.startView(kind === 'webview' ? 'WebView/Validation' : kind === 'version-diff' ? 'Replay/VersionDiffCoverage' : kind === 'input' ? 'Replay/InputCoverage' : kind === 'basic' ? 'Replay/BasicCoverage' : kind === 'scroll' ? 'Replay/ScrollCoverage' : kind === 'layout' ? 'Replay/LayoutCoverage' : kind === 'effects' ? 'Replay/EffectsCoverage' : kind === 'motion' ? 'Replay/MotionCoverage' : kind === 'native' ? 'Replay/NativeCoverage' : 'Replay/AssetCoverage', ATTRIBUTES); }
+      const scene = kind === 'webview' ? node.addComponent(WebViewValidationScene) : kind === 'version-diff' ? node.addComponent(ReplayVersionDiffScene) : kind === 'evidence' ? node.addComponent(ReplayEvidenceScene) : kind === 'input' ? node.addComponent(ReplayInputScene) : kind === 'basic' ? node.addComponent(ReplayBasicScene) : kind === 'scroll' ? node.addComponent(ReplayScrollScene) : kind === 'layout' ? node.addComponent(ReplayLayoutScene) : kind === 'effects' ? node.addComponent(ReplayEffectsScene) : kind === 'motion' ? node.addComponent(ReplayMotionScene) : kind === 'native' ? node.addComponent(ReplayNativeScene) : node.addComponent(ReplayAssetScene);
+      await scene.initialize(restore, (caseId: string, stage: string) => {
+        console.log('[ReplayFull249]', JSON.stringify({ engine: cc.ENGINE_VERSION, kind, case_id: caseId, stage, hostTime: Date.now() }));
+        if (!this.entered) return;
+        // Only fixed case identifiers and phases leave this page; never forward input payloads.
+        truewatchSdk.rum.addAction(`replay_${kind}_case`, 'custom', { ...ATTRIBUTES, case_id: caseId, stage });
+      });
+    } catch (error) { console.error("[ReplayCoverage] initialization failed", String(error), error && (error as Error).stack); restore(); this.setStatus(`Unable to open coverage: ${String(error)}`, COLORS.danger); }
   }
 
   private openGame(): void {
@@ -417,7 +490,7 @@ class HybridTelemetryRuntime {
     // The shared game uses the same screen camera, so HUD and gameplay are captured together.
     cc.view.setDesignResolutionSize(960, 640, cc.ResolutionPolicy.SHOW_ALL);
     sampleRoot.active = false;
-    if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
+    if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
     const node = new cc.Node('StarportGame');
 
     sampleRoot.parent!.addChild(node);
@@ -436,8 +509,8 @@ class HybridTelemetryRuntime {
       this.render(sampleRoot);
       this.setStatus(this.entered ? 'Cocos page active · automatic and manual network samples ready' : 'Editor preview only. Build Android or iOS to call the native bridge.', this.entered ? COLORS.primary : COLORS.warning);
       cc.view.setDesignResolutionSize(960, 640, this.maskShowAll ? cc.ResolutionPolicy.SHOW_ALL : cc.ResolutionPolicy.FIXED_HEIGHT);
-      truewatchSdk.setReplayCamera(this.replayCamera);
-      if (this.privacyMaskProbe) truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask');
+      truewatchSdk?.setReplayCamera(this.replayCamera);
+      if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'mask');
       if (this.entered) { truewatchSdk.rum.stopView(); truewatchSdk.rum.startView(VIEW_NAME, ATTRIBUTES); }
     };
     try {

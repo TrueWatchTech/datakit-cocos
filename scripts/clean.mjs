@@ -2,11 +2,14 @@ import { rm } from 'node:fs/promises';
 
 const generated = [
   'packages/cocos/components',
-  ...['dist', 'native', 'components', 'LICENSE', 'THIRD_PARTY_NOTICES'].map(name => `packages/cocos-session-replay/${name}`),
+  ...['dist', 'runtime', 'native', 'components', 'LICENSE', 'THIRD_PARTY_NOTICES'].map(name => `packages/cocos-session-replay/${name}`),
+  'packages/cocos/web/bootstrap.js',
+  'packages/cocos/web/bootstrap.js.map',
   'packages/cocos/dist',
   'packages/cocos/extensions',
   'packages/cocos/native',
   'packages/cocos/bin',
+  'packages/cocos/runtime',
   'packages/cocos/LICENSE',
   'packages/creator2/dist',
   'packages/creator2/extension',

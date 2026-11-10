@@ -1,10 +1,12 @@
-import { Camera, Director, EditBox, Node, RenderTexture, UITransform, Vec3, director, isValid, native, sys, view } from 'cc';
+import { Camera, Director, EditBox, Node, RenderTexture, UITransform, Vec3, director, isValid, native, screen, sys } from 'cc';
 import type { FTCanvasCapture } from '../core/replay.js';
 import type { FTCapturedFrame, FTPrivacyRegion, FTReplayPrivacyMode, FTStoredFrame } from '../core/types.js';
 import { frameFingerprint } from '../core/replay.js';
 import { persistReplayFrame, disposeReplayFrame } from '../core/replay-file.js';
-import { projectPrivacyBounds } from '../core/replay-privacy.js';
 import { collectReplayPrivacyNodes } from '../core/replay-privacy-nodes.js';
+import { clippedPrivacyBounds } from '../core/replay-privacy-bounds.js';
+import { privacyProjectionWeight, projectPrivacyPoints, rendererPrivacyBounds, transformPrivacyPoint } from '../core/replay-renderer-bounds.js';
+import type { PrivacyGeometry } from '../core/replay-renderer-bounds.js';
 import { waitForRenderTextureReadback } from './replay-render-cycle.js';
 
 const CAPTURE_CANCELLED = Symbol('Replay capture cancelled');
@@ -39,8 +41,13 @@ export class FTCreator3CanvasCapture implements FTCanvasCapture {
   }
 
   getViewportSize(): { width: number; height: number } | undefined {
-    const visible = view.getVisibleSizeInPixel?.() || view.getVisibleSize();
-    return visible ? { width: visible.width, height: visible.height } : undefined;
+    // SHOW_ALL's visible area excludes letterboxing and can have a different
+    // aspect ratio from the screen. The isolated camera must keep the screen
+    // aspect ratio when reusing the source camera's projection parameters.
+    const size = screen.windowSize;
+    return size && Number.isFinite(size.width) && Number.isFinite(size.height)
+      && size.width > 0 && size.height > 0
+      ? { width: size.width, height: size.height } : undefined;
   }
 
   async capture(maxImageDimension: number): Promise<FTCapturedFrame | undefined> {
@@ -105,8 +112,13 @@ export class FTCreator3CanvasCapture implements FTCanvasCapture {
     // A camera that preserves its framebuffer must not accumulate previous
     // replay snapshots in a reused target (for example, moving overlay UI).
     const clearsTarget = (source.clearFlags & Camera.ClearFlag.SOLID_COLOR) === Camera.ClearFlag.SOLID_COLOR;
+    // Creator 3.8 native post-processing keys its output resource by camera ID.
+    // updateRenderWindow replaces the window but leaves RenderSwapchain.texture
+    // pointing at the first target. GLES needs a fresh target for readback, so
+    // replace its isolated camera too, giving that target a new output slot.
+    const replacesPostProcessCamera = sys.os !== sys.OS?.IOS && source.usePostProcess;
     if (current && this.isCurrent(current) && current.source === source
-      && current.width === width && current.height === height) {
+      && current.width === width && current.height === height && !replacesPostProcessCamera) {
       // Native GLES3 repeated readback of one target can read the screen FBO
       // instead. Keep the isolated camera, but use a fresh target outside iOS;
       // Metal reuse is covered by native screenshot regression checks.
@@ -205,20 +217,56 @@ export class FTCreator3CanvasCapture implements FTCanvasCapture {
       scene?.getComponentsInChildren(EditBox) || [],
     );
     const regions: FTPrivacyRegion[] = [];
+    const matrix = camera.camera?.matViewProj;
+    const worldMatrices = new Map<any, any>();
+    const geometry: PrivacyGeometry = {
+      creator: 3,
+      toWorld: (node: any, point) => {
+        if (!worldMatrices.has(node)) worldMatrices.set(node, node.worldMatrix);
+        return transformPrivacyPoint(point, worldMatrices.get(node));
+      },
+      project: (point) => {
+        const clipW = privacyProjectionWeight(matrix, point);
+        if (clipW !== undefined && clipW <= 0) return { x: 0, y: 0, clipW };
+        const projected = camera.worldToScreen?.(new Vec3(point.x, point.y, point.z ?? 0));
+        if (!projected) throw new Error('Unable to project Replay privacy geometry');
+        return { x: projected.x, y: projected.y, clipW };
+      },
+    };
+    const uiBounds = (current: any) => {
+      const transform = current.getComponent?.(UITransform);
+      if (!transform) return undefined;
+      const size = transform.contentSize; const anchor = transform.anchorPoint;
+      if (size.width === 0 || size.height === 0) return undefined;
+      const x = -size.width * anchor.x; const y = -size.height * anchor.y;
+      return projectPrivacyPoints([
+        { x, y }, { x: x + size.width, y }, { x, y: y + size.height }, { x: x + size.width, y: y + size.height },
+      ].map(point => transform.convertToWorldSpaceAR(new Vec3(point.x, point.y, 0))), geometry);
+    };
+    const cache = new Map<any, ReturnType<typeof rendererPrivacyBounds>>();
+    const renderer = (current: any) => {
+      if (!cache.has(current)) cache.set(current, rendererPrivacyBounds(current, geometry));
+      return cache.get(current)!;
+    };
     nodes.forEach((mode, node: any) => {
-      const bounds = node?.getComponent?.(UITransform)?.getBoundingBoxToWorld?.();
+      const bounds = clippedPrivacyBounds(node, {
+        ownBounds: (current: any) => {
+          const ui = uiBounds(current); const render = renderer(current).clipped;
+          if (!ui) return render;
+          if (!render) return ui;
+          const x = Math.min(ui.x, render.x); const y = Math.min(ui.y, render.y);
+          return { x, y, width: Math.max(ui.x + ui.width, render.x + render.width) - x,
+            height: Math.max(ui.y + ui.height, render.y + render.height) - y };
+        },
+        clipBounds: uiBounds,
+        unclippedBounds: (current: any) => renderer(current).unclipped,
+        clipsChildren: (current: any) => {
+          const mask = current.getComponent?.('cc.Mask');
+          return !!mask?.enabledInHierarchy && !mask.inverted;
+        },
+      });
       if (!bounds) return;
-      const worldZ = node.worldPosition?.z || 0;
-      const projected = projectPrivacyBounds(
-        bounds,
-        width,
-        height,
-        width,
-        height,
-        (x, y) => camera.worldToScreen?.(new Vec3(x, y, worldZ)),
-      );
-      if (!projected) throw new Error('Unable to project Replay privacy bounds');
-      regions.push({ ...projected, mode: mode === 'hide' ? 'hide' : 'mask' });
+      regions.push({ ...bounds, y: height - bounds.y - bounds.height, mode: mode === 'hide' ? 'hide' : 'mask' });
     });
     return regions;
   }

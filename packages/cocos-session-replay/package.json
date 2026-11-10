@@ -1,6 +1,6 @@
 {
   "name": "@truewatchtech/cocos-session-replay",
-  "version": "0.1.0",
+  "version": "0.1.1-alpha.4",
   "description": "Optional Session Replay for the TrueWatch Cocos Creator SDK",
   "license": "Apache-2.0",
   "author": "TrueWatch",
@@ -40,7 +40,8 @@
     "native-integration.json",
     "README.md",
     "LICENSE",
-    "THIRD_PARTY_NOTICES"
+    "THIRD_PARTY_NOTICES",
+    "runtime"
   ],
   "engines": {
     "node": ">=14"
@@ -53,6 +54,6 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@truewatchtech/cocos-sdk": "0.1.0"
+    "@truewatchtech/cocos-sdk": "0.1.1-alpha.4"
   }
 }

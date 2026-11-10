@@ -7,7 +7,7 @@
 /profiles/
 /native/
 /cocos-sdk-native/
-/extensions/truewatch-cocos-sdk/
+/extensions/*-cocos-sdk/
 /native-host/android/HybridSampleEnvironment.java
 /native-host/ios/HybridSampleEnvironment.generated.h
 /native-host/android/ReplayTrafficBenchmarkEnvironment.java
@@ -23,8 +23,15 @@
 # Generated from the common acceptance game by npm run game:sync.
 /assets/acceptance-game/
 /assets/acceptance-game.meta
+/assets/acceptance-components/
+/assets/acceptance-components.meta
 /assets/resources/starport-sfx/
 /assets/resources/starport-sfx.meta
 
-/assets/truewatch-cocos-sdk.meta
+/assets/*-cocos-sdk.meta
+/assets/*-cocos-sdk-runtime/
+/assets/*-cocos-sdk-runtime.meta
 /cocos-sdk.config.json
+
+/assets/resources/replay-media/
+/assets/resources/replay-media.meta

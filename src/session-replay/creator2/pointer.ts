@@ -16,29 +16,39 @@ export class FTCreator2PointerSource implements FTReplayPointerSource {
 }
 
 function onSceneTouch(type: string, handler: (event: any) => void): () => void {
-  let scene: any;
+  let detach = () => {};
   const bind = (): void => {
-    scene?.off(type, handler, undefined, true);
-    scene = cc.director.getScene();
-    scene?.on(type, handler, undefined, true);
+    detach();
+    const scene = cc.director.getScene();
+    if (!scene) { detach = () => {}; return; }
+    // Capture descendant events without installing a native hit-test listener on Scene.
+    const dispatchOnly = typeof scene._onDispatch === 'function' && typeof scene._offDispatch === 'function';
+    const on = dispatchOnly ? scene._onDispatch : scene.on;
+    const off = dispatchOnly ? scene._offDispatch : scene.off;
+    on.call(scene, type, handler, undefined, true);
+    detach = () => off.call(scene, type, handler, undefined, true);
   };
   cc.director.on(cc.Director.EVENT_AFTER_SCENE_LAUNCH, bind);
   bind();
   return () => {
     cc.director.off(cc.Director.EVENT_AFTER_SCENE_LAUNCH, bind);
-    scene?.off(type, handler, undefined, true);
+    detach();
   };
 }
 
 function replayPointer(event: any, eventType: 'down' | 'up'): FTReplayPointerEvent {
   const location = event.getLocation?.() || { x: 0, y: 0 };
-  const size = cc.view.getVisibleSize?.() || { width: 1, height: 1 };
-  const origin = cc.view.getVisibleOrigin?.() || { x: 0, y: 0 };
+  const size = cc.view.getCanvasSize();
+  const viewport = cc.view.getViewportRect();
+  // Creator 2 has already removed the viewport offset and scale from touches.
+  // Convert back to the full canvas used by Replay, including letterboxing.
+  const x = location.x * cc.view.getScaleX() + viewport.x;
+  const y = location.y * cc.view.getScaleY() + viewport.y;
   return {
     eventType,
     pointerId: event.getID?.() ?? event.touch?.getID?.() ?? 0,
-    normalizedX: size.width > 0 ? (location.x - origin.x) / size.width : 0,
-    normalizedY: size.height > 0 ? 1 - ((location.y - origin.y) / size.height) : 0,
+    normalizedX: size.width > 0 ? x / size.width : 0,
+    normalizedY: size.height > 0 ? 1 - y / size.height : 0,
     timestamp: Date.now(),
   };
 }

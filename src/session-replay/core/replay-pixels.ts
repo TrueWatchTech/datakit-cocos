@@ -1,3 +1,13 @@
+/** Native acceleration is optional so existing native integrations keep working. */
+export function makeRgbaOpaque(bytes: Uint8Array): void {
+  const bridge = (globalThis as { __ftCocosReplayFile?: { makeOpaque?(pixels: Uint8Array): void } }).__ftCocosReplayFile;
+  if (typeof bridge?.makeOpaque === 'function') {
+    bridge.makeOpaque(bytes);
+    return;
+  }
+  for (let alpha = 3; alpha < bytes.length; alpha += 4) bytes[alpha] = 255;
+}
+
 /** Converts tightly packed RGBA pixels from bottom-left to top-left row order. */
 export function flipRgbaRows(bytes: Uint8Array, width: number, height: number): void {
   const rowSize = width * 4;

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "name": "@truewatchtech/cocos-session-replay",
-  "version": "0.1.0",
-  "baseVersion": "0.1.0",
+  "version": "0.1.1-alpha.4",
+  "baseVersion": "0.1.1-alpha.4",
   "iosSdkVersion": "1.6.8",
-  "androidReplay": "com.truewatch.ft.mobile.sdk.tracker.agent:ft-session-replay:0.1.9",
+  "androidReplay": "com.truewatch.ft.mobile.sdk.tracker.agent:ft-session-replay:0.1.10-alpha01",
   "androidFragment": "androidx.fragment:fragment:1.8.0"
 }

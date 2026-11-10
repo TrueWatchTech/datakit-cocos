@@ -29,8 +29,6 @@ import java.util.Map;
 
 /** Cocos reflection entry point. All calls and responses are JSON envelopes. */
 public final class FTCocosBridge {
-    private static final String COCOS_SDK_VERSION_KEY = "sdk_package_cocos";
-
     private FTCocosBridge() {
     }
 
@@ -61,7 +59,7 @@ public final class FTCocosBridge {
     private static Object dispatch(String method, JSONObject payload) throws Exception {
         switch (method) {
             case "hybrid.attach":
-                attachHybrid(payload);
+                ensureNativeHostInitialized();
                 return null;
             case "sdk.configure":
                 configureSdk(payload);
@@ -130,13 +128,6 @@ public final class FTCocosBridge {
         }
     }
 
-    private static void attachHybrid(JSONObject json) throws Exception {
-        ensureNativeHostInitialized();
-        if (hasText(json, "sdkVersion")) {
-            FTSdk.appendGlobalContext(COCOS_SDK_VERSION_KEY, json.getString("sdkVersion"));
-        }
-    }
-
     private static void ensureNativeHostInitialized() {
         if (FTSdk.get() == null) {
             throw new IllegalStateException(
@@ -156,6 +147,10 @@ public final class FTCocosBridge {
         if (json.has("debug")) config.setDebug(json.getBoolean("debug"));
         if (hasText(json, "env")) config.setEnv(json.getString("env"));
         if (hasText(json, "serviceName")) config.setServiceName(json.getString("serviceName"));
+        if (json.has("allowWebViewHost")) {
+            config.setAllowWebViewHost(json.isNull("allowWebViewHost")
+                    ? null : stringArray(json.getJSONArray("allowWebViewHost")));
+        }
         addStringContext(json.optJSONObject("globalContext"), new StringContextSetter() {
             @Override public void set(String key, String value) { config.addGlobalContext(key, value); }
         });
@@ -187,6 +182,7 @@ public final class FTCocosBridge {
         if (json.has("enableNativeUserAction")) config.setEnableTraceUserAction(json.getBoolean("enableNativeUserAction"));
         if (json.has("enableNativeUserView")) config.setEnableTraceUserView(json.getBoolean("enableNativeUserView"));
         if (json.has("enableNativeUserResource")) config.setEnableTraceUserResource(json.getBoolean("enableNativeUserResource"));
+        if (json.has("enableTraceWebView")) config.setEnableTraceWebView(json.getBoolean("enableTraceWebView"));
         if (json.has("enableNativeCrash")) config.setEnableTrackAppCrash(json.getBoolean("enableNativeCrash"));
         if (json.has("enableNativeAnr")) config.setEnableTrackAppANR(json.getBoolean("enableNativeAnr"));
         if (json.has("enableNativeUiBlock")) {
@@ -210,6 +206,7 @@ public final class FTCocosBridge {
         else if (json.has("sampleRate")) config.setSamplingRate((float) json.getDouble("sampleRate"));
         if (json.has("enableLinkRumData")) config.setEnableLinkRumData(json.getBoolean("enableLinkRumData"));
         if (json.has("enableCustomLog")) config.setEnableCustomLog(json.getBoolean("enableCustomLog"));
+        if (json.has("enableWebViewLog")) config.setEnableWebViewLog(json.getBoolean("enableWebViewLog"));
         if (json.has("printCustomLogToConsole")) config.setPrintCustomLogToConsole(json.getBoolean("printCustomLogToConsole"));
         if (json.has("logCacheLimitCount")) config.setLogCacheLimitCount(json.getInt("logCacheLimitCount"));
         if ("discardOldest".equals(json.optString("discardStrategy"))) config.setLogCacheDiscardStrategy(LogCacheDiscard.DISCARD_OLDEST);

@@ -22,6 +22,7 @@ vi.mock('cc', () => ({
     off(type: string, handler: (event: unknown) => void) { inputState.handlers.get(type)?.delete(handler); },
   },
   view: { getVisibleSize: () => ({ width: 100, height: 100 }) },
+  screen: { windowSize: { width: 100, height: 100 } },
 }));
 
 afterEach(() => {
@@ -87,7 +88,7 @@ async function run(pattern: InputPattern, motion: 'large' | 'small' = 'large') {
   const stopActions = hooks.onAction((name, attributes) => rum.startAction(name, 'click', attributes));
   const replay = new FTSessionReplay(transport, capture, new FTCreator3PointerSource());
   const emit = (type: string) => inputState.handlers.get(type)?.forEach((handler) => handler({
-    target: { name: 'Attack' }, getID: () => 1, getUILocation: () => ({ x: 50, y: 50 }),
+    target: { name: 'Attack' }, getID: () => 1, getLocation: () => ({ x: 50, y: 50 }),
   }));
   replay.start({ captureFps: 2, touchPrivacy: 'show', imagePolicy: {} });
   let inputTimer: ReturnType<typeof setInterval> | undefined;

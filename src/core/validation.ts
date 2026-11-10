@@ -36,3 +36,12 @@ export function requireText(value: string, name: string): string {
   if (!value.trim()) throw new TypeError(`${name} must not be empty`);
   return value;
 }
+
+export function validateWebViewHosts(value: unknown): void {
+  if (value === undefined || value === null) return;
+  const message = 'sdk.allowWebViewHost must be an array of strings or null';
+  if (!Array.isArray(value)) throw new TypeError(message);
+  for (const host of value) {
+    if (typeof host !== 'string') throw new TypeError(message);
+  }
+}

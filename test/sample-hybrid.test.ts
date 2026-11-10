@@ -11,7 +11,7 @@ describe('Hybrid sample Replay privacy', () => {
   it.each(runnableHybridSamples)('%s includes an explicit Replay mask probe', (relativePath) => {
     const source = readFileSync(path.join(process.cwd(), relativePath), 'utf8');
     expect(source).toContain("this.panel(replayNode, 'PrivacyMaskProbe'");
-    expect(source).toContain("truewatchSdk.replay.setPrivacy(this.privacyMaskProbe, 'mask')");
+    expect(source).toContain("truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'mask')");
     expect(source).toContain('MASK-ME-8391');
   });
 });

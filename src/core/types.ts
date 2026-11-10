@@ -24,6 +24,11 @@ export interface FTSDKConfig {
   env?: FTEnvironment;
   /** Enables native SDK debug output. */
   debug?: boolean;
+  /**
+   * Allowed WebView hosts shared by RUM and logs. `null` allows every host;
+   * an empty array disables automatic Bridge use. Omit to keep native defaults.
+   */
+  allowWebViewHost?: string[] | null;
   /** String attributes included with all data produced by the native SDK. */
   globalContext?: Record<string, string>;
 }
@@ -66,6 +71,8 @@ export interface FTRUMConfig {
   enableNativeUserView?: boolean;
   /** Enables native resource tracking. */
   enableNativeUserResource?: boolean;
+  /** Enables WebView RUM collection through the native Bridge. @defaultValue `true` */
+  enableTraceWebView?: boolean;
   /** Enables native crash tracking. */
   enableNativeCrash?: boolean;
   /** Enables Android ANR tracking. Ignored on platforms that do not support it. */
@@ -100,6 +107,8 @@ export interface FTLoggerConfig {
   enableLinkRumData?: boolean;
   /** Enables logs submitted through the Cocos SDK logger. */
   enableCustomLog?: boolean;
+  /** Enables Browser Logs SDK events from WebViews. @defaultValue `false` */
+  enableWebViewLog?: boolean;
   /** Mirrors custom logs to the platform console. */
   printCustomLogToConsole?: boolean;
   /** Policy used when the native log cache reaches its limit. */

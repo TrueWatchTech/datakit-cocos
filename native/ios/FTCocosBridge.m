@@ -32,10 +32,6 @@
     FTExternalDataManager *rum = [FTExternalDataManager sharedManager];
     if ([method isEqualToString:@"hybrid.attach"]) {
         [self ensureNativeHostInitialized];
-        NSString *sdkVersion = [self text:arguments[@"sdkVersion"]];
-        if (sdkVersion.length > 0) {
-            [FTMobileAgent appendGlobalContext:@{ @"sdk_package_cocos": sdkVersion }];
-        }
         return nil;
     }
     if ([method isEqualToString:@"sdk.configure"]) {
@@ -53,6 +49,10 @@
         if (arguments[@"debug"]) config.enableSDKDebugLog = [arguments[@"debug"] boolValue];
         if ([self text:arguments[@"env"]].length > 0) config.env = arguments[@"env"];
         if ([self text:arguments[@"serviceName"]].length > 0) config.service = arguments[@"serviceName"];
+        if (arguments[@"allowWebViewHost"]) {
+            config.allowWebViewHost = arguments[@"allowWebViewHost"] == [NSNull null]
+                ? nil : arguments[@"allowWebViewHost"];
+        }
         if ([arguments[@"globalContext"] isKindOfClass:NSDictionary.class]) config.globalContext = arguments[@"globalContext"];
         [FTMobileAgent startWithConfigOptions:config];
         return nil;
@@ -90,6 +90,7 @@
         if (arguments[@"enableNativeUserAction"]) config.enableTraceUserAction = [arguments[@"enableNativeUserAction"] boolValue];
         if (arguments[@"enableNativeUserView"]) config.enableTraceUserView = [arguments[@"enableNativeUserView"] boolValue];
         if (arguments[@"enableNativeUserResource"]) config.enableTraceUserResource = [arguments[@"enableNativeUserResource"] boolValue];
+        if (arguments[@"enableTraceWebView"]) config.enableTraceWebView = [arguments[@"enableTraceWebView"] boolValue];
         if (arguments[@"enableNativeCrash"]) config.enableTrackAppCrash = [arguments[@"enableNativeCrash"] boolValue];
         if (arguments[@"enableNativeAnr"]) config.enableTrackAppANR = [arguments[@"enableNativeAnr"] boolValue];
         if (arguments[@"enableNativeUiBlock"]) {
@@ -157,6 +158,7 @@
         }
         if (arguments[@"enableLinkRumData"]) config.enableLinkRumData = [arguments[@"enableLinkRumData"] boolValue];
         if (arguments[@"enableCustomLog"]) config.enableCustomLog = [arguments[@"enableCustomLog"] boolValue];
+        if (arguments[@"enableWebViewLog"]) config.enableWebViewLog = [arguments[@"enableWebViewLog"] boolValue];
         if (arguments[@"printCustomLogToConsole"]) config.printCustomLogToConsole = [arguments[@"printCustomLogToConsole"] boolValue];
         if (arguments[@"logCacheLimitCount"]) config.logCacheLimitCount = [arguments[@"logCacheLimitCount"] intValue];
         config.discardType = [[self text:arguments[@"discardStrategy"]] isEqualToString:@"discardOldest"] ? FTDiscardOldest : FTDiscard;

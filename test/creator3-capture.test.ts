@@ -1,12 +1,13 @@
 /// <reference path="../src/creator3/shims.d.ts" />
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Camera, Node } from 'cc';
+import { Camera, Node, UITransform } from 'cc';
 import { FTCreator3CanvasCapture } from '../src/session-replay/creator3/capture';
 import { applyPrivacyRegions } from '../src/session-replay/core/replay';
 
 const state = vi.hoisted(() => ({
   visible: { width: 1920, height: 1080 }, scene: undefined as any,
+  window: undefined as undefined | { width: number; height: number },
   cameras: [] as any[], textures: [] as any[],
   listeners: new Map<string, Set<() => void>>(), os: 'Android',
   project: undefined as undefined | (() => unknown), readError: false,
@@ -92,6 +93,7 @@ vi.mock('cc', () => {
       off: (event: string, callback: () => void) => state.listeners.get(event)?.delete(callback),
     },
     view: { getVisibleSizeInPixel: () => state.visible },
+    screen: { get windowSize() { return state.window || state.visible; } },
     sys: { get os() { return state.os; }, OS: { IOS: 'iOS' } }, native: {},
   };
 });
@@ -111,6 +113,7 @@ const captures: FTCreator3CanvasCapture[] = [];
 afterEach(() => { captures.splice(0).forEach(capture => capture.dispose()); });
 function setup(visible = { width: 1920, height: 1080 }, previous?: { width: number; height: number }) {
   state.visible = visible;
+  state.window = undefined;
   state.cameras = [];
   state.textures = [];
   state.listeners.clear();
@@ -132,7 +135,10 @@ function setup(visible = { width: 1920, height: 1080 }, previous?: { width: numb
   captures.push(capture);
   capture.setPrivacy({
     worldPosition: { z: 30 },
-    getComponent: () => ({ getBoundingBoxToWorld: () => ({ x: 0.2, y: 0.2, width: 0.2, height: 0.2 }) }),
+    getComponent: (type: unknown) => type === UITransform ? {
+      contentSize: { width: 0.2, height: 0.2 }, anchorPoint: { x: 0, y: 0 },
+      convertToWorldSpaceAR: (point: { x: number; y: number }) => ({ x: point.x + 0.2, y: point.y + 0.2 }),
+    } : undefined,
   }, 'mask');
   return { capture, source, targetWrite };
 }
@@ -144,6 +150,42 @@ async function take(capture: FTCreator3CanvasCapture, dimension = 720) {
 }
 
 describe('Creator 3 isolated replay capture', () => {
+  it('preserves the portrait screen projection across SHOW_ALL design changes', async () => {
+    const { capture, source } = setup({ width: 1206, height: 804 });
+    state.window = { width: 1206, height: 2622 };
+    state.os = 'iOS';
+    source.orthoHeight = 480 * 2622 / 1206;
+    const first = (await take(capture))!;
+    expect(capture.getViewportSize()).toEqual(state.window);
+    expect([first.width, first.height]).toEqual([331, 720]);
+    const camera = state.cameras[1];
+    // A 960-unit panel fills the source screen width. Its normalized bounds
+    // must also fill the replay width, within one pixel of size rounding.
+    const projectedWidth = 960 * first.height / (2 * camera.orthoHeight);
+    expect(Math.abs(projectedWidth - first.width)).toBeLessThan(1);
+    state.visible = { width: 1206, height: 1608 };
+    const second = (await take(capture))!;
+    expect([second.width, second.height]).toEqual([331, 720]);
+    expect(state.textures).toHaveLength(1);
+    state.window = { width: 2622, height: 1206 };
+    const landscape = (await take(capture))!;
+    expect([landscape.width, landscape.height]).toEqual([720, 331]);
+    expect(state.textures).toHaveLength(2);
+    state.window = { width: 1206, height: 2622 };
+    const restored = (await take(capture))!;
+    expect([restored.width, restored.height]).toEqual([331, 720]);
+    expect(state.textures).toHaveLength(3);
+    expect(state.textures[1].destroyed).toBe(true);
+  });
+
+  it.each([0, -1, NaN, Infinity])('skips an invalid window dimension %s', async width => {
+    const { capture } = setup();
+    state.window = { width, height: 2622 };
+    expect(capture.getViewportSize()).toBeUndefined();
+    expect(await capture.capture(720)).toBeUndefined();
+    expect(state.textures).toHaveLength(0);
+  });
+
   it.each([
     { name: 'full screen', visible: { width: 1920, height: 1080 }, previous: undefined },
     { name: 'SHOW_ALL letterboxing', visible: { width: 1080, height: 1080 }, previous: undefined },
@@ -216,6 +258,25 @@ describe('Creator 3 isolated replay capture', () => {
     expect(state.textures).toHaveLength(3);
     expect(state.textures.map(texture => texture.destroyed)).toEqual([true, true, false]);
     expect(state.cameras[1].targetTexture).toBe(state.textures[2]);
+  });
+  it('gives each Android post-process target its own isolated camera', async () => {
+    const { capture, source, targetWrite } = setup();
+    source.usePostProcess = true;
+    source.postProcess = { settings: new Map() };
+    await take(capture);
+    const texture = state.textures[0];
+    source.postProcess.settings.set('Bloom', { intensity: 4 });
+    await take(capture);
+    await take(capture);
+    expect(texture.destroyed).toBe(true);
+    expect(state.textures).toHaveLength(3);
+    expect(state.cameras[3].postProcess).toBe(source.postProcess);
+    expect(state.cameras[3].usePostProcess).toBe(true);
+    expect(targetWrite).not.toHaveBeenCalled();
+    expect(state.cameras).toHaveLength(4);
+    expect(state.cameras[1].node.isValid).toBe(false);
+    expect(state.cameras[2].node.isValid).toBe(false);
+    expect(state.cameras[3].node.isValid).toBe(true);
   });
   it.each(['iOS', 'Android'])('preserves pixel orientation on %s', async os => {
     const { capture } = setup();

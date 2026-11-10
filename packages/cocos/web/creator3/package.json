@@ -1,0 +1,4 @@
+{
+  "main": "../../dist/creator3/web/creator3.js",
+  "types": "../../dist/creator3/web/creator3.d.ts"
+}

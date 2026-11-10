@@ -1,13 +1,15 @@
 import { FTLogger, FTRUM, FTTrace } from './modules.js';
 import type { FTAutoTrackingController, FTAutoTrackingScope } from './client.js';
 import type { FTAutoTrackingConfig, FTAttributes } from './types.js';
+import type { FTJsbErrorGlobal } from '../native/jsb-errors.js';
+import { FTObservationQueue, observationState } from './observation.js';
 
 export interface FTEngineTrackingHooks {
   onSceneChanged(callback: (name: string) => void, includeCurrent?: boolean): () => void;
   onAction(callback: (name: string, attributes?: FTAttributes) => void): () => void;
 }
 
-interface FTGlobalWithFetch {
+interface FTGlobalWithFetch extends FTJsbErrorGlobal {
   fetch?: typeof fetch;
   XMLHttpRequest?: typeof XMLHttpRequest;
   console?: Console;
@@ -19,6 +21,7 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
   private stops: Array<() => void> = [];
   private networkStops: Array<() => void> = [];
   private activeView: string | undefined;
+  private readonly observations: FTObservationQueue;
 
   constructor(
     private readonly rum: FTRUM,
@@ -26,7 +29,9 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
     private readonly trace: FTTrace,
     private readonly hooks: FTEngineTrackingHooks,
     private readonly target: FTGlobalWithFetch = globalThis,
-  ) {}
+  ) {
+    this.observations = new FTObservationQueue(target);
+  }
 
   start(config: FTAutoTrackingConfig, viewName?: string, scope: FTAutoTrackingScope = 'all'): void {
     this.stop(scope);
@@ -55,6 +60,7 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
     };
     if (scope !== 'page') this.networkStops.splice(0).reverse().forEach(cleanup);
     if (scope !== 'network') {
+      this.observations.stop();
       this.stops.splice(0).reverse().forEach(cleanup);
       if (this.activeView) {
         cleanup(() => this.rum.stopView());
@@ -85,6 +91,26 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
   }
 
   private installErrorTracking(): void {
+    const nativeErrors = this.target.__FT_COCOS_JSB_ERRORS__;
+    if (nativeErrors?.protocol === 2) {
+      this.stops.push(nativeErrors.subscribe((location, message, stack) => {
+        // Creator 2 also reports promise bookkeeping notifications through onError.
+        if (message === 'handlerAddedAfterPromiseRejected' || message === 'rejectAfterPromiseResolved'
+          || message === 'resolveAfterPromiseResolved') return;
+        const rejection = message === 'unhandledRejectedPromise';
+        const reason = rejection ? stack.split(/\r?\n/, 1)[0]?.replace(/^Error:\s*/, '') : message;
+        const errorMessage = reason || message || 'Uncaught JavaScript error';
+        const errorStack = stack || location || '';
+        const type = rejection ? 'unhandled_promise_rejection' : 'cocos_error';
+        this.observations.enqueue(() => {
+          this.rum.addError(errorMessage, errorStack, type);
+        }, 2 * (location.length + message.length + stack.length));
+      }));
+      return;
+    }
+    if (nativeErrors || typeof this.target.jsb?.onError === 'function') {
+      throw new Error('Cocos native error bootstrap is missing. Rerun the SDK installer and rebuild the native project.');
+    }
     if (!this.target.addEventListener || !this.target.removeEventListener) return;
     const errorListener = (event: Event): void => {
       const errorEvent = event as ErrorEvent;
@@ -118,20 +144,42 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
       'warn',
       'error',
     ];
+    const observations = this.observations;
+    const state = observationState(this.target);
     const originals = new Map<string, (...args: unknown[]) => void>();
+    const wrappers = new Map<string, (...args: unknown[]) => unknown>();
+    let active = true;
     methods.forEach((method) => {
-      const original = consoleObject[method].bind(consoleObject) as (...args: unknown[]) => void;
+      const original = consoleObject[method];
       originals.set(method, original);
-      consoleObject[method] = ((...args: unknown[]) => {
-        original(...args);
-        const level = method === 'warn' ? 'warning' : method === 'error' ? 'error' : 'info';
-        this.logger.log(args.map(stringifyLogValue).join(' '), level);
-      }) as Console[typeof method];
+      const logger = this.logger;
+      consoleObject[method] = function (this: unknown, ...args: unknown[]): unknown {
+        let snapshot: { timestampMs: number; values: unknown[] } | undefined;
+        try {
+          if (active && !state.reporting) snapshot = { timestampMs: Date.now(), values: args.slice(0, 16) };
+        } catch { /* Snapshot failures cannot prevent the original console call. */ }
+        // Keep the original receiver, result and thrown value. No SDK work can
+        // escape this finally block and replace the original console outcome.
+        try { return original.apply(this, args); }
+        finally {
+          try {
+            if (active && snapshot) {
+              const { timestampMs, values } = snapshot;
+              observations.enqueue(() => {
+                const level = method === 'warn' ? 'warning' : method === 'error' ? 'error' : 'info';
+                logger.log(values.map(stringifyLogValue).join(' '), level, { cocos_observed_at_ms: timestampMs });
+              }, values.reduce<number>((size, value) => size + (typeof value === 'string' ? value.length * 2 : 64), 0));
+            }
+          } catch { /* Logging must never change application console behavior. */ }
+        }
+      } as Console[typeof method];
+      wrappers.set(method, consoleObject[method]);
     });
     this.stops.push(() => {
+      active = false;
       methods.forEach((method) => {
         const original = originals.get(method);
-        if (original) consoleObject[method] = original as Console[typeof method];
+        if (original && consoleObject[method] === wrappers.get(method)) consoleObject[method] = original as Console[typeof method];
       });
     });
   }
@@ -139,39 +187,79 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
   private installFetchTracking(): void {
     const original = this.target.fetch;
     if (!original) return;
-    const tracked = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      const inputObject = typeof input === 'object' ? input as { url?: string; method?: string; headers?: HeadersInit } : undefined;
-      const url = typeof input === 'string' ? input : inputObject?.url || String(input);
-      const method = init?.method || inputObject?.method || 'GET';
-      const key = resourceKey();
-      const headers = createHeaders(init?.headers || inputObject?.headers);
-      forEachOwn(this.trace.getHeaders(url, key), (name, value) => setHeader(headers, name, value));
-      this.rum.startResource(key);
-      const start = nowNs();
+    const rum = this.rum;
+    const trace = this.trace;
+    let active = true;
+    const tracked = function (this: unknown, ...args: Parameters<typeof fetch>): Promise<Response> {
+      if (!active) return original.apply(this, args);
+      let outgoing = args;
+      let data: { key: string; url: string; method: string; start: number; headers?: FTNetworkHeaders } | undefined;
+      observeNetwork(() => {
+        const [input, init] = args;
+        const inputObject = networkInput(input);
+        if (!inputObject) return;
+        const { url } = inputObject;
+        const method = networkOption(init, 'method') as string | undefined;
+        const sourceHeaders = networkOption(init, 'headers') as HeadersInit | undefined;
+        const record = { key: resourceKey(), url, method: method || inputObject.method || 'GET',
+          start: nowNs(), headers: undefined as FTNetworkHeaders | undefined };
+        data = record;
+        try {
+          const headers = createHeaders(sourceHeaders === undefined ? inputObject.headers : sourceHeaders);
+          let appended = false;
+          forEachOwn(trace.getHeaders(url, record.key), (name, value) => {
+            if (!hasHeader(headers, name)) {
+              appendHeader(headers, name, value);
+              appended = true;
+            }
+          });
+          if (appended) {
+            outgoing = args.slice() as Parameters<typeof fetch>;
+            outgoing[1] = withRequestHeaders(init, headers);
+          }
+          record.headers = headers;
+        } catch { /* Failed instrumentation leaves the original fetch arguments intact. */ }
+        observeNetwork(() => rum.startResource(record.key));
+      });
+      const reportFailure = (error: unknown): void => {
+        if (!data) return;
+        const { key } = data;
+        observeNetwork(() => rum.stopResource(key));
+        observeNetwork(() => rum.addError(String(error), error instanceof Error ? error.stack || '' : '', 'network_error'));
+      };
+      let result: Promise<Response>;
+      // Invoke the application request once. Observation failures must never retry it.
       try {
-        const response = await original(input, { ...init, headers });
-        const end = nowNs();
-        this.rum.stopResource(key);
-        this.rum.addResource(
-          key,
-          {
-            url,
-            httpMethod: method,
-            requestHeaders: headersToObject(headers),
-            responseHeaders: headersToObject(response.headers),
-            statusCode: response.status,
-          },
-          { fetchStartTime: start, responseStartTime: end, responseEndTime: end },
-        );
-        return response;
+        result = original.apply(this, outgoing);
       } catch (error) {
-        this.rum.stopResource(key);
-        this.rum.addError(String(error), error instanceof Error ? error.stack || '' : '', 'network_error');
+        reportFailure(error);
         throw error;
       }
-    }) as typeof fetch;
+      if (!data) return result;
+      const record = data;
+      try {
+        return result.then((response) => {
+          observeNetwork(() => rum.stopResource(record.key));
+          observeNetwork(() => {
+            const end = nowNs();
+            rum.addResource(record.key, {
+              url: record.url,
+              httpMethod: record.method,
+              requestHeaders: record.headers && headersToObject(record.headers),
+              responseHeaders: headersToObject(response.headers),
+              statusCode: response.status,
+            }, { fetchStartTime: record.start, responseStartTime: end, responseEndTime: end });
+          });
+          return response;
+        }, (error: unknown) => {
+          reportFailure(error);
+          throw error;
+        });
+      } catch { return result; }
+    } as typeof fetch;
     this.networkStops.push(() => {
-      this.target.fetch = original;
+      active = false;
+      if (this.target.fetch === tracked) this.target.fetch = original;
     });
     this.target.fetch = tracked;
   }
@@ -182,65 +270,112 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
     const open = Xhr.prototype.open;
     const send = Xhr.prototype.send;
     const setRequestHeader = Xhr.prototype.setRequestHeader;
-    const metadata = new WeakMap<XMLHttpRequest, { key: string; method: string; url: string; headers: Record<string, string> }>();
+    const metadata = new WeakMap<XMLHttpRequest, {
+      key: string; method: string; url: string; headers: Record<string, string>; headersKnown: boolean;
+    }>();
     const rum = this.rum;
     const trace = this.trace;
+    let active = true;
 
-    // Register each restore before assignment so partial installation can roll back.
-    this.networkStops.push(() => { Xhr.prototype.open = open; });
-
-    Xhr.prototype.open = function trackedOpen(this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]): void {
-      metadata.set(this, { key: resourceKey(), method, url: String(url), headers: {} });
-      (open as (...args: unknown[]) => void).call(this, method, url, ...rest);
-    } as typeof open;
-    this.networkStops.push(() => { Xhr.prototype.setRequestHeader = setRequestHeader; });
-    Xhr.prototype.setRequestHeader = function trackedHeader(this: XMLHttpRequest, name: string, value: string): void {
-      const data = metadata.get(this);
-      if (data) data.headers[name] = value;
-      setRequestHeader.call(this, name, value);
-    };
-    this.networkStops.push(() => { Xhr.prototype.send = send; });
-    Xhr.prototype.send = function trackedSend(this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null): void {
-      const data = metadata.get(this);
-      if (!data) return send.call(this, body);
-      forEachOwn(trace.getHeaders(data.url, data.key), (name, value) => {
-        data.headers[name] = value;
-        setRequestHeader.call(this, name, value);
+    const trackedOpen = function (this: XMLHttpRequest, ...args: unknown[]): void {
+      if (!active) return (open as (...args: unknown[]) => void).apply(this, args);
+      const previous = metadata.get(this);
+      observeNetwork(() => {
+        metadata.delete(this);
+        if (typeof args[0] !== 'string' || typeof args[1] !== 'string') return;
+        metadata.set(this, { key: resourceKey(), method: args[0] as string, url: String(args[1]),
+          headers: Object.create(null) as Record<string, string>, headersKnown: true });
       });
-      const started = nowNs();
-      rum.startResource(data.key);
+      try { return (open as (...args: unknown[]) => void).apply(this, args); }
+      catch (error) {
+        observeNetwork(() => { if (previous) metadata.set(this, previous); else metadata.delete(this); });
+        throw error;
+      }
+    } as typeof open;
+    // Register each restore before assignment so partial installation can roll back.
+    this.networkStops.push(() => { active = false; if (Xhr.prototype.open === trackedOpen) Xhr.prototype.open = open; });
+    Xhr.prototype.open = trackedOpen;
+    const trackedHeader = function (this: XMLHttpRequest, ...args: Parameters<typeof setRequestHeader>): void {
+      const result = setRequestHeader.apply(this, args);
+      observeNetwork(() => {
+        const data = active && metadata.get(this);
+        if (!data) return;
+        const [name, value] = args;
+        if (typeof name !== 'string' || typeof value !== 'string') { data.headersKnown = false; return; }
+        const key = name.toLowerCase();
+        data.headers[key] = key in data.headers ? `${data.headers[key]}, ${value}` : value;
+      });
+      return result;
+    };
+    this.networkStops.push(() => {
+      active = false;
+      if (Xhr.prototype.setRequestHeader === trackedHeader) Xhr.prototype.setRequestHeader = setRequestHeader;
+    });
+    Xhr.prototype.setRequestHeader = trackedHeader;
+    const trackedSend = function (this: XMLHttpRequest, ...args: Parameters<typeof send>): void {
+      const data = active && metadata.get(this);
+      if (!data) return send.apply(this, args);
+      observeNetwork(() => {
+        if (!data.headersKnown) return;
+        forEachOwn(trace.getHeaders(data.url, data.key), (name, value) => {
+          if (!validTraceHeader(name, value)) return;
+          const key = name.toLowerCase();
+          if (key in data.headers) return;
+          setRequestHeader.call(this, name, value);
+          data.headers[key] = value;
+        });
+      });
+      let started = 0;
+      observeNetwork(() => { started = nowNs(); rum.startResource(data.key); });
       let completed = false;
+      let cleanup: (() => void) | undefined;
       const report = (): void => {
         if (completed) return;
         completed = true;
-        const ended = nowNs();
-        rum.stopResource(data.key);
-        rum.addResource(
-          data.key,
-          {
+        observeNetwork(() => cleanup?.());
+        observeNetwork(() => rum.stopResource(data.key));
+        observeNetwork(() => {
+          const ended = nowNs();
+          rum.addResource(data.key, {
             url: data.url,
             httpMethod: data.method,
             requestHeaders: data.headers,
             responseHeaders: parseXhrHeaders(this.getAllResponseHeaders()),
             statusCode: this.status,
-          },
-          { fetchStartTime: started, responseStartTime: ended, responseEndTime: ended },
-        );
+          }, { fetchStartTime: started, responseStartTime: ended, responseEndTime: ended });
+        });
       };
-      const originalLoadEnd = this.onloadend;
-      this.addEventListener('loadend', report, { once: true });
-      // Creator 2 JSB implements addEventListener by assigning the on* property.
-      // Preserve the business handler there; DOM runtimes already keep both listeners.
-      if (this.onloadend === report) {
-        const xhr = this;
-        const handler: NonNullable<XMLHttpRequest['onloadend']> = function (event): void {
-          if (xhr.onloadend === handler) xhr.onloadend = originalLoadEnd;
-          try { originalLoadEnd?.call(xhr, event); } finally { report(); }
-        };
-        this.onloadend = handler;
+      observeNetwork(() => {
+        const originalLoadEnd = this.onloadend;
+        try {
+          this.addEventListener('loadend', report, { once: true });
+          // Creator 2 JSB assigns the on* property instead of keeping a listener list.
+          if (this.onloadend === report) {
+            const xhr = this;
+            const handler: NonNullable<XMLHttpRequest['onloadend']> = function (...events): unknown {
+              observeNetwork(() => cleanup?.());
+              try { return originalLoadEnd?.apply(this, events); } finally { report(); }
+            };
+            cleanup = () => { if (xhr.onloadend === handler) xhr.onloadend = originalLoadEnd; };
+            this.onloadend = handler;
+          } else {
+            cleanup = () => this.removeEventListener('loadend', report);
+          }
+        } catch {
+          observeNetwork(() => cleanup?.());
+          observeNetwork(() => { if (this.onloadend === report) this.onloadend = originalLoadEnd; });
+        }
+      });
+      try { return send.apply(this, args); }
+      catch (error) {
+        completed = true;
+        observeNetwork(() => cleanup?.());
+        observeNetwork(() => rum.stopResource(data.key));
+        throw error;
       }
-      send.call(this, body);
     };
+    this.networkStops.push(() => { active = false; if (Xhr.prototype.send === trackedSend) Xhr.prototype.send = send; });
+    Xhr.prototype.send = trackedSend;
   }
 }
 
@@ -254,32 +389,89 @@ function resourceKey(): string {
   return `cocos-${Date.now().toString(36)}-${resourceSequence.toString(36)}`;
 }
 
-function createHeaders(source?: HeadersInit): Headers | Record<string, string> {
+type FTNetworkHeaders = Headers | Array<[string, string]>;
+
+function observeNetwork(observe: () => void): void {
+  try { observe(); } catch { /* Monitoring cannot change the application's network result. */ }
+}
+
+function networkOption(init: RequestInit | undefined, name: string): unknown {
+  for (let source = init; source; source = Object.getPrototypeOf(source) as RequestInit | undefined) {
+    const descriptor = Object.getOwnPropertyDescriptor(source, name);
+    if (!descriptor) continue;
+    // Accessors may refresh tokens or mutate options. Leave them to the original fetch.
+    if (descriptor.get || descriptor.set) throw new TypeError('Network option requires its original receiver');
+    return descriptor.value;
+  }
+  return undefined;
+}
+
+function networkInput(input: RequestInfo | URL): { url: string; method?: string; headers?: HeadersInit } | undefined {
+  if (typeof input === 'string') return { url: input };
+  if (typeof Request === 'function' && input instanceof Request) {
+    const read = (name: string): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(Request.prototype, name);
+      return descriptor?.get ? descriptor.get.call(input) : networkOption(input, name);
+    };
+    return { url: read('url') as string, method: read('method') as string, headers: read('headers') as HeadersInit };
+  }
+  if (typeof URL === 'function' && input instanceof URL) return { url: URL.prototype.toString.call(input) };
+  // Custom string conversion belongs to the application request and must only run there.
+  return undefined;
+}
+
+function withRequestHeaders(init: RequestInit | undefined, headers: FTNetworkHeaders): RequestInit {
+  const result = Object.create(init || null) as RequestInit;
+  // Forward getters to their original receiver, including inherited/non-enumerable options.
+  for (let source = init; source && source !== Object.prototype; source = Object.getPrototypeOf(source) as RequestInit | undefined) {
+    Object.getOwnPropertyNames(source).forEach((name) => {
+      if (name === 'headers' || Object.prototype.hasOwnProperty.call(result, name)) return;
+      const descriptor = Object.getOwnPropertyDescriptor(source, name);
+      Object.defineProperty(result, name, { enumerable: descriptor?.enumerable, configurable: true,
+        get: () => (init as Record<string, unknown>)[name] });
+    });
+  }
+  Object.defineProperty(result, 'headers', { value: headers, enumerable: true, configurable: true, writable: true });
+  return result;
+}
+
+function createHeaders(source?: HeadersInit): FTNetworkHeaders {
   const HeadersConstructor = (globalThis as unknown as { Headers?: typeof Headers }).Headers;
   if (HeadersConstructor) return new HeadersConstructor(source);
-  const result: Record<string, string> = {};
+  const result: Array<[string, string]> = [];
   if (Array.isArray(source)) {
-    source.forEach(([name, value]) => { result[name] = String(value); });
+    source.forEach(([name, value]) => { result.push([String(name), String(value)]); });
   } else if (source && typeof (source as Headers).forEach === 'function') {
-    (source as Headers).forEach((value, name) => { result[name] = value; });
+    (source as Headers).forEach((value, name) => { result.push([name, value]); });
   } else if (source) {
-    forEachOwn(source as Record<string, string>, (name, value) => { result[name] = String(value); });
+    forEachOwn(source as Record<string, string>, (name, value) => { result.push([name, String(value)]); });
   }
   return result;
 }
 
-function setHeader(headers: Headers | Record<string, string>, name: string, value: string): void {
-  if (typeof (headers as Headers).set === 'function') (headers as Headers).set(name, value);
-  else (headers as Record<string, string>)[name] = value;
+function hasHeader(headers: FTNetworkHeaders, name: string): boolean {
+  return Array.isArray(headers) ? headers.some(([key]) => key.toLowerCase() === name.toLowerCase()) : headers.has(name);
 }
 
-function headersToObject(headers: Headers | Record<string, string>): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (typeof (headers as Headers).forEach === 'function') {
-    (headers as Headers).forEach((value, key) => { result[key] = value; });
-  } else {
-    forEachOwn(headers as Record<string, string>, (key, value) => { result[key] = value; });
-  }
+function appendHeader(headers: FTNetworkHeaders, name: string, value: string): void {
+  if (!validTraceHeader(name, value)) throw new TypeError('Invalid trace header');
+  if (Array.isArray(headers)) headers.push([name, value]);
+  else headers.append(name, value);
+}
+
+function validTraceHeader(name: string, value: string): boolean {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name) && typeof value === 'string'
+    && !/[\x00-\x08\x0a-\x1f\x7f\u0100-\uffff]/.test(value);
+}
+
+function headersToObject(headers: FTNetworkHeaders): Record<string, string> {
+  const result: Record<string, string> = Object.create(null) as Record<string, string>;
+  const append = (value: string, name: string): void => {
+    const key = name.toLowerCase();
+    result[key] = key in result ? `${result[key]}, ${value}` : value;
+  };
+  if (Array.isArray(headers)) headers.forEach(([name, value]) => append(value, name));
+  else headers.forEach(append);
   return result;
 }
 

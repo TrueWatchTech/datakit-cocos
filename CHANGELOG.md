@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.1.1-alpha.4
+
+### Fixes
+
+- **Network request compatibility**: Preserve application `fetch` and `XMLHttpRequest` arguments, request options, existing trace headers, callbacks, and error behavior. Monitoring failures no longer interrupt or retry application requests, and stopping collection preserves wrappers installed by the host application.
+- **Creator 2 scene compatibility**: Avoid Node-only API access on `cc.Scene` during scene tracking, Replay capture, privacy checks, and touch collection.
+- **Creator 2 native Replay**: Separate pixel processing and storage handoff from display rendering, reduce game-thread pixel-copy overhead, preserve display alpha and camera clearing behavior, and avoid display trails. Cancel deferred work when recording stops.
+- **Hybrid sample compatibility**: Correct Creator 2/3 sample API usage, media fixtures, preview initialization, and resource cleanup. Update Creator 3.8.8 rendering examples and sample-local Metal compatibility. Add the stencil buffer required by Creator 2 sample hosts while preserving custom surface creation.
+
+### Migration
+
+- Upgrade `@truewatchtech/cocos-sdk` and optional `@truewatchtech/cocos-session-replay` together to `0.1.1-alpha.4`. Rerun the SDK installer with `--replay` or `--no-replay`, regenerate the native project, and rebuild to install the updated runtime and native bridges. Hybrid sample users should also rerun `native:install` for their generated projects.
+- Native SDK dependencies remain Android Agent `1.7.6`, Android Session Replay `0.1.10-alpha01`, and iOS Agent / Session Replay `1.6.8`.
+
+## 0.1.1-alpha.3
+
+### Features
+
+- **Native WebView configuration**: Forward `sdk.allowWebViewHost`, `rum.enableTraceWebView`, and `logger.enableWebViewLog` to Android and iOS. WebView RUM is enabled by default; WebView logs are disabled by default. Omit the host list to preserve native defaults, use `null` to allow every host, or use an empty array to disable automatic Bridge use.
+- **Native JavaScript errors**: Automatically capture JSB errors and runtime-supported unhandled Promise rejections while preserving the engine's original error handler.
+- **Environment collection tool**: Add `scripts/collect-cocos-env.cjs` to collect local Cocos, SDK dependency, component, and native integration facts for troubleshooting. The standalone tool does not execute project code or upload reports, and redacts customer-specific version labels and build metadata.
+
+### Improvements
+
+- **Console collection**: Defer automatic log reporting through a bounded queue, preserve original console behavior, and prevent SDK reporting from recursively collecting itself.
+- **Replay validation samples**: Expand Creator 2 and Creator 3 samples with rendering, input, motion, layout, scrolling, asset, effect, privacy, and WebView validation scenes.
+
+### Fixes
+
+- **Native Replay capture and rotation**: Preserve full-window dimensions and camera projection, clear fresh Creator 2 render targets, and emit viewport resize events when rotating within a View.
+- **Replay touch ownership**: Keep queued touches associated with their original application, session, and View during asynchronous capture and page transitions.
+- **Replay privacy bounds**: Correct clipping and projected privacy bounds, including particle and mesh renderers; skip capture when protected geometry cannot be projected reliably.
+- **Hybrid native samples**: Preserve Android reflection entry points in release builds and correct Swift Package Manager dependencies and Objective-C imports for iOS.
+
+### Migration
+
+- Upgrade `@truewatchtech/cocos-sdk` and optional `@truewatchtech/cocos-session-replay` together to `0.1.1-alpha.3`. Rerun the SDK installer with `--replay` or `--no-replay`, regenerate the native project, and rebuild to install the updated runtime, JSB error bootstrap, and native bridges.
+- Native SDK dependencies remain Android Agent `1.7.6`, Android Session Replay `0.1.10-alpha01`, and iOS Agent / Session Replay `1.6.8`. Hybrid hosts continue to configure WebView collection through their native SDK initialization.
+
+## 0.1.1-alpha.2
+
+### Features
+
+- **Web support**: Add Web Mobile and Web Desktop integration for Creator 2 and Creator 3, including scene and action tracking, errors, logs, automatic network collection, and trace correlation. Web Error events include `cocos_error_state`.
+- **Web Session Replay**: Add optional canvas recording with sampling, capture frequency, image quality, dimensions, and per-image size limits. Canvas capture is blocked by default; protected nodes and input fields block the entire canvas rather than applying native node-level masks.
+- **Unified project configuration**: Configure native and Web collection and Replay through project settings, with shared sampling and platform-specific capture options.
+
+### Fixes
+
+- **Creator 2 native Replay**: Correct render-target setup and pixel readback to resolve incorrect Replay frame capture on Android and iOS.
+- **Creator 2 source maps**: Embed source content in base and Replay package source maps to address Creator 2 build compatibility when SourceMap is enabled.
+
+### Migration
+
+- Upgrade the base SDK and optional native Replay package together to `0.1.1-alpha.2`. Rerun the SDK installer and rebuild, including base-only native integrations, to install the required platform runtime.
+- Web integrations require separate Web reporting settings and application ID. Install Browser RUM / Logs `3.3.22` as needed, plus Browser WebGL `3.3.8` for Replay, then run the installer with `--web`. Web Replay must initialize before the Cocos engine.
+- Web does not support all native APIs, including timed Actions, manual Resource timing, manual Long Tasks, and manual trace-header generation.
+
+## 0.1.1-alpha.1
+
+### Fixes
+
+- **Android Replay focus callbacks**: Upgrade Android Session Replay to `0.1.10-alpha01`, which forwards Window focus changes to the host and disables recorder callbacks retained under an outer wrapper after recording ownership changes. This fixes the Cocos rendering stop observed when returning from a full-screen native Activity. Android Agent remains `1.7.6`; iOS Agent / Session Replay remains `1.6.8`.
+- **Creator 2 Hybrid sample navigation**: Keep Cocos and native pages in one application process. Cocos remains the launcher and task root; closing a native page resumes the existing Cocos Activity without recreating the engine. The sample reclaims Cocos recording ownership after drawing resumes.
+
+### Migration
+
+- Upgrade `@truewatchtech/cocos-sdk` and `@truewatchtech/cocos-session-replay` together to `0.1.1-alpha.1`. Rerun `npx truewatch-cocos install --replay`, resolve native dependencies, and rebuild. Native hosts that manage Replay themselves must also upgrade Android Session Replay to `0.1.10-alpha01`.
+- Rerun the Creator 2 Hybrid sample's `native:install` command to migrate older exports from the separate Cocos process and bridge provider to the single-process Activity setup.
+
 ## 0.1.0
 
 Initial stable release for native Android and iOS applications built with Cocos Creator.

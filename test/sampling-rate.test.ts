@@ -31,6 +31,40 @@ class EmptyCapture implements FTCanvasCapture {
 afterEach(() => vi.useRealTimers());
 
 describe('percentage sampling configuration', () => {
+  const fields = [
+    ['rum', 'sessionSamplingRate', 'sampleRate'],
+    ['rum', 'sessionOnErrorSamplingRate', 'sessionOnErrorSampleRate'],
+    ['logger', 'logSamplingRate', 'sampleRate'],
+    ['trace', 'traceSamplingRate', 'sampleRate'],
+    ['replay', 'sessionReplaySamplingRate', 'sampleRate'],
+    ['replay', 'sessionReplayOnErrorSamplingRate', 'sessionOnErrorSampleRate'],
+  ] as const;
+  function startModule(scope: typeof fields[number][0], transport: RecordingTransport, config: Record<string, number>) {
+    if (scope === 'rum') new FTRUM(transport).start({ androidAppId: 'app', ...config });
+    else if (scope === 'logger') new FTLogger(transport).start(config);
+    else if (scope === 'trace') new FTTrace(transport).start(config);
+    else {
+      const replay = new FTSessionReplay(transport, new EmptyCapture());
+      replay.start(config);
+      replay.stop();
+    }
+  }
+
+  it.each(fields)('%s honors explicit zero %s over invalid legacy %s without mutating input', (scope, percentage, legacy) => {
+    vi.useFakeTimers();
+    const transport = new RecordingTransport();
+    const config = Object.freeze({ [percentage]: 0, [legacy]: NaN });
+    startModule(scope, transport, config);
+    expect(transport.payload(`${scope}.configure`)).toEqual(scope === 'rum' ? { androidAppId: 'app', [percentage]: 0 } : { [percentage]: 0 });
+    expect(config[legacy]).toBeNaN();
+  });
+
+  it.each(fields)('%s rejects invalid %s before bridge calls instead of using valid %s', (scope, percentage, legacy) => {
+    const transport = new RecordingTransport();
+    expect(() => startModule(scope, transport, { [percentage]: NaN, [legacy]: 1 })).toThrow(/0 and 100/);
+    expect(transport.calls).toEqual([]);
+  });
+
   it.each([0, 0.1, 1, 20, 99.9, 100])(
     'accepts sessionSamplingRate=%s as a percentage',
     (sessionSamplingRate) => {

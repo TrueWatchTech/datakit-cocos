@@ -40,10 +40,11 @@ describe('iOS dependency manager configuration', () => {
     mkdirSync(join(f.project, 'assets'));
     mkdirSync(join(pkg, 'bin'), { recursive: true });
     mkdirSync(join(pkg, 'native'));
+    cpSync(resolve('packages/cocos/runtime'), join(pkg, 'runtime'), { recursive: true });
     mkdirSync(join(pkg, 'extensions', `creator${creator}`), { recursive: true });
     cpSync(resolve('src/session-replay/components'), join(pkg, 'components'), { recursive: true });
     cpSync(resolve('installer/cli.cjs'), join(pkg, 'bin', 'cli.cjs'));
-    for (const helper of ['managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', helper), join(pkg, 'bin', helper));
+    for (const helper of ['project-configuration.cjs', 'managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', helper), join(pkg, 'bin', helper));
     writeFileSync(join(pkg, 'package.json'), '{"name":"test-sdk"}');
     writeFileSync(f.config, '{"custom":42,"ios":{"other":true}}');
     const args = [join(pkg, 'bin', 'cli.cjs'), '--project', f.project, '--creator', String(creator)];
@@ -148,6 +149,7 @@ describe.skipIf(process.platform !== 'darwin')('SPM Xcode integration', () => {
     const extension = join(f.project, creator === 2 ? 'packages' : 'extensions', 'truewatch-cocos-sdk');
     cpSync(resolve(`integrations/creator${creator}`), extension, { recursive: true });
     for (const file of ['install-native.cjs', 'install-spm.cjs', 'managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', file), join(extension, file));
+    for (const file of ['project-configuration.cjs', 'install-spm.cjs', 'managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', file), join(extension, file));
     cpSync(resolve('native'), join(extension, 'native'), { recursive: true });
     const previousEditor = (globalThis as any).Editor;
     let callback: any;

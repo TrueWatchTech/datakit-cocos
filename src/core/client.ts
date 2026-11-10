@@ -98,6 +98,12 @@ export class FTCocosSDK {
     this.trace = new FTTrace(transport, this.ownership);
   }
 
+  /** @internal Ownership state used by the platform facade. */
+  get lifecycleMode(): 'idle' | 'standalone' | 'hybrid' {
+    return this.state === 'standalone' ? 'standalone' : this.state === 'hybrid-attached' || this.state === 'hybrid-entered' ? 'hybrid' : 'idle';
+  }
+  get isCocosEntered(): boolean { return this.state === 'standalone' || this.state === 'hybrid-entered'; }
+
   /** Attaches an optional package before SDK initialization. */
   registerExtension<T>(id: string, version: string, engine: string, factory: () => FTSDKExtension<T>): T {
     if (version !== FT_COCOS_SDK_VERSION || engine !== this.engine) {
@@ -164,9 +170,7 @@ export class FTCocosSDK {
     this.ownership.claimNativeHost();
     try {
       this.extension?.lifecycle.beforeAttach?.();
-      this.transport.invoke('hybrid.attach', {
-        sdkVersion: FT_COCOS_SDK_VERSION,
-      });
+      this.transport.invoke('hybrid.attach');
       if (config.autoTrack?.network) {
         this.autoTracking?.start({ network: true }, undefined, 'network');
       }

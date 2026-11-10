@@ -11,6 +11,7 @@ declare module 'cc' {
   export const input: any;
   export const isValid: any;
   export const native: any;
+  export const screen: any;
   export const sys: any;
   export const view: any;
 }

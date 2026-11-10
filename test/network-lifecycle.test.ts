@@ -19,7 +19,7 @@ class Transport implements FTNativeTransport {
 }
 
 const cleanups: Array<() => void> = [];
-afterEach(() => { cleanups.splice(0).reverse().forEach(cleanup => cleanup()); });
+afterEach(() => { cleanups.splice(0).reverse().forEach(cleanup => cleanup()); vi.useRealTimers(); });
 
 function setup(engine: 'creator2' | 'creator3' = 'creator2', propertyEvents = false) {
   // A fresh prototype per test prevents one SDK instance from wrapping another.
@@ -208,6 +208,7 @@ describe('network lifecycle isolation and failure recovery', () => {
   });
 
   it('keeps scene, action, error and console tracking page-scoped', () => {
+    vi.useFakeTimers();
     const f = setup();
     const config: FTAutoTrackingConfig = { network: true, scenes: true, actions: true, errors: true, console: true };
     const error = () => f.events.dispatchEvent(Object.assign(new Event('error'), { message: 'test error' }));
@@ -219,6 +220,8 @@ describe('network lifecycle isolation and failure recovery', () => {
     expect(f.calls('logger.log')).toHaveLength(0);
     f.sdk.enterCocos({ viewName: 'Game' });
     emit();
+    expect(f.calls('logger.log')).toHaveLength(0);
+    vi.runOnlyPendingTimers();
     f.sdk.leaveCocos();
     emit();
     expect(f.calls('rum.startView')).toHaveLength(2);

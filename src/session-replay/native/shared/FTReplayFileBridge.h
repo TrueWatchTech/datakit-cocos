@@ -7,6 +7,8 @@
 #include "cocos/scripting/js-bindings/jswrapper/SeApi.h"
 #endif
 #include "FTReplayFileWorker.h"
+#include "FTReplayParticleBounds.h"
+#include "FTReplayPixelOps.h"
 
 namespace ft_cocos {
 
@@ -39,12 +41,43 @@ static bool removeReplayFile(se::State& state) {
 }
 SE_BIND_FUNC(removeReplayFile)
 
+static bool fingerprintReplayPixels(se::State& state) {
+    const auto& args = state.args();
+    if (args.size() != 1 || !args[0].isObject()) return false;
+    auto* object = args[0].toObject();
+    if (!object->isTypedArray()) return false;
+    uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!object->getTypedArrayData(&bytes, &size)) return false;
+    state.rval().setString(replayFrameFingerprint(bytes, size));
+    return true;
+}
+SE_BIND_FUNC(fingerprintReplayPixels)
+
+static bool makeReplayPixelsOpaqueBinding(se::State& state) {
+    const auto& args = state.args();
+    if (args.size() != 1 || !args[0].isObject()) return false;
+    auto* object = args[0].toObject();
+    if (!object->isTypedArray()) return false;
+    uint8_t* bytes = nullptr;
+    size_t size = 0;
+    if (!object->getTypedArrayData(&bytes, &size)) return false;
+    makeReplayPixelsOpaque(bytes, size);
+    return true;
+}
+SE_BIND_FUNC(makeReplayPixelsOpaqueBinding)
+
 static bool registerReplayFileBridge(se::Object* global) {
     replayFiles.cancel();
     const se::HandleObject bridge(se::Object::createPlainObject());
     bridge->defineFunction("write", _SE(writeReplayFile));
     bridge->defineFunction("poll", _SE(pollReplayFile));
     bridge->defineFunction("remove", _SE(removeReplayFile));
+    bridge->defineFunction("fingerprint", _SE(fingerprintReplayPixels));
+    bridge->defineFunction("makeOpaque", _SE(makeReplayPixelsOpaqueBinding));
+#if FT_COCOS_PARTICLE_BOUNDS
+    bridge->defineFunction("particleBounds", _SE(readReplayParticleBounds));
+#endif
     global->setProperty("__ftCocosReplayFile", se::Value(bridge));
     se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() { replayFiles.cancel(); });
     return true;

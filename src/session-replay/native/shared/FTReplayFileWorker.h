@@ -3,10 +3,10 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
-#include <vector>
 
 namespace ft_cocos {
 
@@ -28,13 +28,17 @@ public:
             auto job = std::make_shared<Job>();
             job->path = path;
             // This bounded copy is necessary because the JS buffer can be collected/reused.
-            std::vector<unsigned char> pixels(bytes, bytes + size);
+            // The iterator constructor can copy byte by byte in Debug builds.
+            // An owned allocation and memcpy keep this mandatory game-thread
+            // handoff bounded without retaining the VM's mutable pixel memory.
+            std::unique_ptr<unsigned char[]> pixels(new unsigned char[size]);
+            std::memcpy(pixels.get(), bytes, size);
             current = job;
-            std::thread([job](std::vector<unsigned char> data) {
+            std::thread([job, size](std::unique_ptr<unsigned char[]> data) {
                 FILE* file = std::fopen(job->path.c_str(), "wb");
                 bool ok = false;
                 if (file) {
-                    const bool written = std::fwrite(data.data(), 1, data.size(), file) == data.size();
+                    const bool written = std::fwrite(data.get(), 1, size, file) == size;
                     ok = std::fclose(file) == 0 && written;
                 }
                 if (!ok || job->cancelled.load()) std::remove(job->path.c_str());

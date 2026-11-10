@@ -9,6 +9,7 @@ const engine = vi.hoisted(() => ({
   sceneRegistered: false,
   ui: [] as string[],
   input: {} as any,
+  window: { width: 200, height: 100 },
 }));
 vi.mock('cc', () => {
   const EventType = { TOUCH_START: 'down', TOUCH_MOVE: 'move', TOUCH_END: 'up', TOUCH_CANCEL: 'cancel' };
@@ -21,12 +22,14 @@ vi.mock('cc', () => {
       on() { engine.sceneRegistered = true; }, off() { engine.sceneRegistered = false; },
     }) },
     view: { getVisibleSize: () => ({ width: 200, height: 100 }), getVisibleOrigin: () => ({ x: 10, y: 20 }) },
+    screen: { get windowSize() { return engine.window; } },
   };
 });
 
 let Source: typeof import('../src/session-replay/creator3/pointer').FTCreator3PointerSource;
 beforeEach(async () => {
   engine.sceneRegistered = false;
+  engine.window = { width: 200, height: 100 };
   engine.ui = [];
   engine.global.clear();
   engine.dispatchers = [
@@ -58,7 +61,7 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 function touch(type: string, uiHit = true, id = 1, x = 60, y = 45) {
-  return { type, uiHit, getID: () => id, getUILocation: () => ({ x, y }), propagationStopped: false, preventSwallow: false };
+  return { type, uiHit, getID: () => id, getLocation: () => ({ x: x - 10, y: y - 20 }), getUILocation: () => ({ x, y }), propagationStopped: false, preventSwallow: false };
 }
 function dispatch(event: ReturnType<typeof touch>): void {
   for (const dispatcher of engine.dispatchers) {
@@ -67,6 +70,22 @@ function dispatch(event: ReturnType<typeof touch>): void {
 }
 
 describe('Creator 3 replay does not alter business input dispatch', () => {
+  it('maps screen touches to the full portrait replay, including letterboxing and resize', () => {
+    engine.window = { width: 1206, height: 2622 };
+    const records: FTReplayPointerEvent[] = [];
+    const stop = new Source().onReplayPointer(event => records.push(event));
+    const event = { ...touch('down'), getLocation: () => ({ x: 603, y: 909 }),
+      getUILocation: () => ({ x: 480, y: 0 }) };
+    dispatch(event);
+    expect(records[0]!.normalizedX).toBe(.5);
+    expect(records[0]!.normalizedY).toBeCloseTo(1 - 909 / 2622);
+    // The same UI coordinate cannot determine full-window positions after resize.
+    engine.window = { width: 2622, height: 1206 };
+    dispatch({ ...event, getLocation: () => ({ x: 1311, y: 603 }) });
+    expect(records[1]).toMatchObject({ normalizedX: .5, normalizedY: .5 });
+    stop();
+  });
+
   it('records UI down/up without registering the non-UI Scene or blocking the button', () => {
     vi.useFakeTimers(); vi.setSystemTime(1234);
     const records: FTReplayPointerEvent[] = [];

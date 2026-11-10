@@ -7,7 +7,7 @@ export interface FTTransportResponse<T = FTValue> {
 }
 
 export interface FTNativeTransport {
-  readonly platform: 'android' | 'ios' | 'unsupported';
+  readonly platform: 'android' | 'ios' | 'web' | 'unsupported';
   /**
    * Calls a native bridge operation synchronously and decodes its response.
    *

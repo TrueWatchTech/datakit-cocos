@@ -7,16 +7,45 @@
 
 ## Introduction
 
-TrueWatch Application Monitoring collects and analyzes RUM, Log, and Trace data from Cocos Creator applications. The SDK supports native Android and iOS builds for Cocos Creator 2.4 and 3.x.
+TrueWatch Application Monitoring collects and analyzes RUM, Log, and Trace data from Cocos Creator applications. The SDK supports native Android and iOS builds, plus Web Mobile and Web Desktop builds, for Cocos Creator 2.4 and 3.x.
 
 ## Supported Scope
 
-| Package entry | Supported Cocos Creator | Native targets |
+| Package entry | Supported Cocos Creator | Supported targets |
 | --- | --- | --- |
-| `@truewatchtech/cocos-sdk/creator2` | 2.4.5–2.4.15 | Android API 21+, iOS 15+ |
-| `@truewatchtech/cocos-sdk/creator3` | 3.6.3–3.8.x | Android API 21+, iOS 15+ |
+| `@truewatchtech/cocos-sdk/creator2` | 2.4.5–2.4.15 | Android API 21+, iOS 15+, Web Mobile / Web Desktop |
+| `@truewatchtech/cocos-sdk/creator3` | 3.6.3–3.8.x | Android API 21+, iOS 15+, Web Mobile / Web Desktop |
 
-Cocos Creator 3.0–3.6.2 is supported on a best-effort basis because the stable native build extension API starts at 3.6.3. Web, mini-game, and desktop targets are not currently supported.
+Cocos Creator 3.0–3.6.2 is supported on a best-effort basis because the stable native build extension API starts at 3.6.3. Mini-game and native desktop targets are not currently supported.
+
+## Web integration
+
+Configure Web reporting separately in `cocos-sdk.config.json`; native Android/iOS
+application IDs and reporting endpoints are not reused. See the
+[unified configuration example](https://github.com/TrueWatchTech/datakit-cocos/blob/dev/examples/unified/cocos-sdk.config.example.json).
+Install Browser RUM `3.3.22` and/or Browser Logs `3.3.22` according to the enabled
+collectors; Web Replay also requires Browser WebGL `3.3.8`. Then run
+`npx truewatch-cocos install --web`, reopen Creator, and rebuild the Web project.
+
+Use the same `/creator2` or `/creator3` base SDK entry and call `truewatchSdk.start()`
+to apply project settings. The build extension initializes Browser collectors
+before the engine. Configure Replay through `replay.enabled`, shared sampling,
+and `replay.web`; set `replay.native: false` for Web-only Replay to avoid requiring
+the native Replay package. Native `withSessionReplay(...)` composition is not
+supported on Web.
+
+Web canvas recording requires explicit `canvasPrivacy: "allow"`. Protected nodes
+and input fields block the whole canvas; native node-level masking is unavailable.
+Web also does not support timed Actions, manual Resource timing, manual Long Tasks,
+manual trace-header generation, or shutting down page-wide Browser collectors.
+
+Without Web configuration, importing the base SDK does not start collection.
+Calling initialization or instrumentation APIs without the Web runtime throws an
+error. Native-only integrations must guard SDK calls and native Replay composition
+with a platform check when building for Web.
+
+After upgrading, rerun the installer and rebuild native projects as well,
+including base-only integrations, to install the matching platform runtime.
 
 ## Sampling configuration
 

@@ -16,6 +16,21 @@ afterEach(() => {
 });
 
 describe('native build integration', () => {
+  it.each(['jsb-link', 'data'])('installs the error bootstrap before Creator native scripts in %s', directory => {
+    const root = mkdtempSync(join(tmpdir(), 'cocos-jsb-error-install-')); temporaryRoots.push(root);
+    const entryDirectory = join(root, directory); mkdirSync(join(entryDirectory, 'jsb-adapter'), { recursive: true });
+    const extension = createReplayExtension(root);
+    writeFileSync(join(extension, 'native', 'jsb-errors.js'), 'globalThis.errorBridgeReady = true;\n');
+    const entry = join(entryDirectory, 'main.js');
+    writeFileSync(entry, 'require("jsb-adapter/engine-adapter.js");\n');
+    installNative(root, extension, { info() {}, warn() {} });
+    const first = readFileSync(entry, 'utf8');
+    expect(first.indexOf('errorBridgeReady')).toBeLessThan(first.indexOf('require('));
+    installNative(root, extension, { info() {}, warn() {} });
+    expect(readFileSync(entry, 'utf8')).toBe(first);
+    expect(first.match(/COCOS_SDK_JSB_ERRORS_BEGIN/g)).toHaveLength(1);
+  });
+
   it.each(['AppDelegate.cpp', 'Game.cpp'])('installs the async file binding before scripts start in %s', (name) => {
     const root = mkdtempSync(join(tmpdir(), 'cocos-replay-install-'));
     temporaryRoots.push(root);
@@ -62,7 +77,7 @@ describe('native build integration', () => {
     const iosReplay = readFileSync(resolve('src/session-replay/native/ios/FTCocosReplayBridge.m'), 'utf8');
     expect(android).not.toContain('SessionReplayManager');
     expect(ios).not.toContain('FTSessionReplay.h');
-    expect(android).toContain('FTSdk.appendGlobalContext(COCOS_SDK_VERSION_KEY');
+    expect(android).toContain('ensureNativeHostInitialized();');
     expect(androidReplay).toContain('"setExternalRecorderActive"');
     expect(androidReplay).toContain('.writeExternalSegment(');
     expect(androidReplay).toContain('.setExternalRecordCount(');
@@ -74,7 +89,7 @@ describe('native build integration', () => {
     );
     expect(provider).toContain('FTCocosBridgeModules.invokeLocal(');
     expect(ios).toContain('@"hybrid.attach"');
-    expect(ios).toContain('[FTMobileAgent appendGlobalContext:');
+    expect(ios).toContain('[self ensureNativeHostInitialized];');
     expect(iosReplay).toContain('@"setExternalRecorderActive:"');
   });
 
@@ -84,7 +99,7 @@ describe('native build integration', () => {
 
     expect(installer).toContain('ft-sdk:1.7.6');
     expect(installer).toContain('ft-native:1.1.4');
-    expect(readFileSync('packages/cocos-session-replay/native-integration.json', 'utf8')).toContain('ft-session-replay:0.1.9');
+    expect(readFileSync('packages/cocos-session-replay/native-integration.json', 'utf8')).toContain('ft-session-replay:0.1.10-alpha01');
     expect(podspec).toContain("s.dependency 'TrueWatchSDK/Agent', '1.6.8'");
     expect(podspec).not.toContain("TrueWatchSDK/FTSessionReplay");
     expect(readFileSync('src/session-replay/native/ios/FTCocosReplayBridge.podspec', 'utf8')).toContain("s.dependency 'TrueWatchSDK/FTSessionReplay', '1.6.8'");
@@ -125,7 +140,7 @@ describe('native build integration', () => {
     const podfileText = readFileSync(podfile, 'utf8');
     expect(gradleText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
     expect(gradleText).toContain('https://mvnrepo.truewatch.com/repository/maven-releases');
-    expect(gradleText).toContain('ft-session-replay:0.1.9');
+    expect(gradleText).toContain('ft-session-replay:0.1.10-alpha01');
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain("platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')");
     expect(gradlePropertiesText).toContain('PROP_COMPILE_SDK_VERSION=34');
@@ -164,7 +179,7 @@ describe('native build integration', () => {
     installNative(buildRoot, extension, { info() {}, warn() {} });
 
     const gradleText = readFileSync(gradle, 'utf8');
-    expect(gradleText).toContain('ft-session-replay:0.1.9');
+    expect(gradleText).toContain('ft-session-replay:0.1.10-alpha01');
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain(join(
       buildRoot,
@@ -219,6 +234,7 @@ describe('native build integration', () => {
     mkdirSync(join(extension, 'native', 'android'), { recursive: true });
     cpSync(resolve('integrations/creator3/dist/hooks.js'), join(extension, 'dist', 'hooks.js'));
     cpSync(resolve('integrations/shared/install-native.cjs'), join(extension, 'install-native.cjs'));
+    cpSync(resolve('integrations/shared/project-configuration.cjs'), join(extension, 'project-configuration.cjs'));
     for (const helper of ['managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', helper), join(extension, helper));
     createReplayExtension(root, extension);
     writeFileSync(join(extension, 'native', 'android', 'bridge.txt'), 'bridge');
@@ -328,6 +344,7 @@ describe('native build integration', () => {
     mkdirSync(xcodeProject, { recursive: true });
     cpSync(resolve('integrations/creator3/dist/hooks.js'), join(extension, 'dist', 'hooks.js'));
     cpSync(resolve('integrations/shared/install-native.cjs'), join(extension, 'install-native.cjs'));
+    cpSync(resolve('integrations/shared/project-configuration.cjs'), join(extension, 'project-configuration.cjs'));
     for (const helper of ['managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', helper), join(extension, helper));
     cpSync(resolve('native'), join(extension, 'native'), { recursive: true });
     writeFileSync(join(xcodeProject, 'project.pbxproj'), [

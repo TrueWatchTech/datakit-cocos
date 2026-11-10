@@ -34,6 +34,9 @@ test('functional pair requires coordinated versions and exact non-optional peer'
   pair[1].peerDependencies[baseName] = version;
   pair[1].version = '0.1.0-alpha.7';
   assert.throws(() => validateManifests({ version }, pair), /Version mismatch/);
+  pair[1].version = version;
+  pair[1].peerDependenciesMeta = { [baseName]: { optional: true } };
+  assert.throws(() => validateManifests({ version }, pair), /must be required/);
 });
 
 test('bootstrap or reverse dependency cannot pass release preflight', () => {
@@ -106,6 +109,19 @@ test('packed exports must exist and base cannot retain Replay assets or credenti
   packed.files.pop();
   packed.files.push({ path: '.npmrc' });
   assert.throws(() => validatePackedPackage(packed, manifest, false), /private\/configuration/);
+});
+
+test('conditional runtime and declaration exports are each required in the tarball', () => {
+  const manifest = manifests()[0];
+  manifest.exports['./creator2'] = { types: './dist/creator2.d.ts', require: './dist/creator2.js' };
+  manifest.exports['./creator3'] = { types: './dist/creator3.d.ts', import: './dist/creator3.js' };
+  const paths = ['dist/creator2.d.ts', 'dist/creator2.js', 'dist/creator3.d.ts', 'dist/creator3.js',
+    'creator2/package.json', 'creator3/package.json', 'LICENSE', 'README.md', 'native/ios/Bridge.m'];
+  const packed = { name: baseName, version, files: paths.map(path => ({ path })) };
+  validatePackedPackage(packed, manifest, false);
+  for (const missing of paths.slice(0, 4)) {
+    assert.throws(() => validatePackedPackage({ ...packed, files: packed.files.filter(file => file.path !== missing) }, manifest, false), /Missing packed export/);
+  }
 });
 
 

@@ -4,10 +4,21 @@
     "target": "ES2018",
     "module": "ESNext",
     "moduleResolution": "Node",
-    "lib": ["ES2018", "DOM"],
+    "lib": [
+      "ES2018",
+      "DOM"
+    ],
     "rootDir": "src",
     "outDir": "packages/cocos/dist/creator3",
     "sourceMap": true
   },
-  "include": ["src/core/**/*.ts", "src/creator3/**/*.ts"]
+  "include": [
+    "src/core/**/*.ts",
+    "src/creator3/**/*.ts",
+    "src/web/**/*.ts",
+    "src/native/**/*.ts"
+  ],
+  "exclude": [
+    "src/web/creator2.ts"
+  ]
 }

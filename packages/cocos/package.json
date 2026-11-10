@@ -1,7 +1,7 @@
 {
   "name": "@truewatchtech/cocos-sdk",
-  "version": "0.1.0",
-  "description": "Observability SDK integration for Cocos Creator 2.4 and 3.x",
+  "version": "0.1.1-alpha.4",
+  "description": "Observability SDK integration for Cocos Creator 2.4 and 3.x on Android, iOS, and Web",
   "license": "Apache-2.0",
   "author": "TrueWatch",
   "repository": {
@@ -36,6 +36,20 @@
       "import": "./dist/creator3/core/plugin-api.js",
       "require": "./dist/creator2/core/plugin-api.js",
       "default": "./dist/creator2/core/plugin-api.js"
+    },
+    "./web/creator2": {
+      "types": "./dist/creator2/web/creator2.d.ts",
+      "default": "./dist/creator2/web/creator2.js"
+    },
+    "./web/creator3": {
+      "types": "./dist/creator3/web/creator3.d.ts",
+      "default": "./dist/creator3/web/creator3.js"
+    },
+    "./web/bootstrap": {
+      "types": "./dist/creator2/web/bootstrap.d.ts",
+      "import": "./dist/creator3/web/bootstrap.js",
+      "require": "./dist/creator2/web/bootstrap.js",
+      "default": "./dist/creator2/web/bootstrap.js"
     }
   },
   "files": [
@@ -48,7 +62,9 @@
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES",
-    "plugin-api"
+    "plugin-api",
+    "web",
+    "runtime"
   ],
   "bin": {
     "truewatch-cocos": "bin/cli.cjs"

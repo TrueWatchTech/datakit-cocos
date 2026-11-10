@@ -19,16 +19,22 @@ export class FTCreator2TrackingHooks implements FTEngineTrackingHooks {
 }
 
 function onSceneTouch(type: string, handler: (event: any) => void): () => void {
-  let scene: any;
+  let detach = () => {};
   const bind = (): void => {
-    scene?.off(type, handler, undefined, true);
-    scene = cc.director.getScene();
-    scene?.on(type, handler, undefined, true);
+    detach();
+    const scene = cc.director.getScene();
+    if (!scene) { detach = () => {}; return; }
+    // Capture descendant events without installing a native hit-test listener on Scene.
+    const dispatchOnly = typeof scene._onDispatch === 'function' && typeof scene._offDispatch === 'function';
+    const on = dispatchOnly ? scene._onDispatch : scene.on;
+    const off = dispatchOnly ? scene._offDispatch : scene.off;
+    on.call(scene, type, handler, undefined, true);
+    detach = () => off.call(scene, type, handler, undefined, true);
   };
   cc.director.on(cc.Director.EVENT_AFTER_SCENE_LAUNCH, bind);
   bind();
   return () => {
     cc.director.off(cc.Director.EVENT_AFTER_SCENE_LAUNCH, bind);
-    scene?.off(type, handler, undefined, true);
+    detach();
   };
 }

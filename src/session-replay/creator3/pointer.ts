@@ -1,4 +1,4 @@
-import { Input, input, view } from 'cc';
+import { Input, input, screen } from 'cc';
 import type { FTReplayPointerEvent, FTReplayPointerSource } from '../core/replay.js';
 
 type PointerCallback = (event: FTReplayPointerEvent) => void;
@@ -77,14 +77,15 @@ function deliverPointer(callback: PointerCallback, event: any, eventType: FTRepl
 }
 
 function replayPointer(event: any, eventType: FTReplayPointerEvent['eventType']): FTReplayPointerEvent {
-  const location = event.getUILocation?.() || event.getLocation?.() || { x: 0, y: 0 };
-  const size = view.getVisibleSize?.() || { width: 1, height: 1 };
-  const origin = view.getVisibleOrigin?.() || { x: 0, y: 0 };
+  // Match the full-window capture, including SHOW_ALL letterboxing. UI
+  // coordinates have already removed the viewport offset and design scale.
+  const location = event.getLocation();
+  const size = screen.windowSize;
   return {
     eventType,
     pointerId: event.getID?.() ?? event.touch?.getID?.() ?? 0,
-    normalizedX: size.width > 0 ? (location.x - origin.x) / size.width : 0,
-    normalizedY: size.height > 0 ? 1 - ((location.y - origin.y) / size.height) : 0,
+    normalizedX: size.width > 0 ? location.x / size.width : 0,
+    normalizedY: size.height > 0 ? 1 - location.y / size.height : 0,
     timestamp: Date.now(),
   };
 }

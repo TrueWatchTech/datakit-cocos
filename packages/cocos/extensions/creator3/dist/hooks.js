@@ -65,6 +65,19 @@ exports.onAfterMake = async function onAfterMake(root) {
   install(root);
 };
 
+exports.onBeforeBuild = async function onBeforeBuild(options) {
+  const config = require('../project-configuration.cjs');
+  config.resolveNativeConfiguration(config.readProject(path.resolve(__dirname, '..')));
+  const web = require('../install-web.cjs');
+  if (web.isWebBuild(options)) web.readWebConfig(path.resolve(__dirname, '..'));
+};
+
 exports.onAfterBuild = async function onAfterBuild(options, result) {
+  if (options && ['web-mobile', 'web-desktop'].includes(options.platform)) {
+    const web = require('../install-web.cjs');
+    web.installWeb(result && result.dest || options.dest, path.resolve(__dirname, '..'));
+    return;
+  }
   install(options, result);
+  require('../project-configuration.cjs').configureNativeBuild(result && result.dest || options && options.dest, path.resolve(__dirname, '..'));
 };

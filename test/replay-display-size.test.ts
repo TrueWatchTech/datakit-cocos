@@ -74,7 +74,7 @@ function fixture(v2 = false, viewportAvailable = true) {
 }
 
 const image = (records: Array<{ type: number; data: any }>) => records.find(r => r.type === 10)?.data.wireframes[0];
-const pointer = (records: Array<{ type: number; data: any }>) => records.find(r => r.type === 11)?.data;
+const pointer = (records: Array<{ type: number; data: any }>) => records.find(r => r.type === 11 && r.data.source === 9)?.data;
 
 describe('replay display coordinates', () => {
   it.each([true, false])('keeps V1 display and pointers stable beyond the former budget (viewport API: %s)', async viewportAvailable => {
@@ -120,10 +120,16 @@ describe('replay display coordinates', () => {
       await f.frame(0);
       f.setViewport(720, 1280);
       const rotated = await f.frame(3000);
-      expect(rotated.map(r => r.type)).toEqual([4, 10, 11]);
-      expect(rotated[0]?.data).toEqual({ width: 405, height: 720 });
+      expect(rotated.map(r => r.type)).toEqual([11, 10, 11]);
+      expect(rotated[0]?.data).toEqual({ source: 4, width: 405, height: 720 });
       expect(image(rotated)).toMatchObject({ width: 405, height: 720 });
       expect(pointer(rotated)).toMatchObject({ x: 203, y: 360 });
+      f.setViewport(1280, 720);
+      const restored = await f.frame(6000, false);
+      expect(restored.map(r => r.type)).toEqual([11, 10, 11]);
+      expect(restored[0]?.data).toEqual({ source: 4, width: 720, height: 405 });
+      expect(image(restored)).toMatchObject({ width: 720, height: 405 });
+      expect(pointer(restored)).toMatchObject({ x: 360, y: 203 });
     } finally { f.replay.stop(); }
   });
 
@@ -152,9 +158,9 @@ describe('replay display coordinates', () => {
       expect(f.segments).toHaveLength(1);
       f.acceptImage();
       const records = await f.frame(6000);
-      expect(records.map(r => r.type)).toEqual([4, 10, 11, 11]);
-      expect(records[0]?.data).toEqual({ width: 405, height: 720 });
-      for (const r of records.filter(r => r.type === 11)) {
+      expect(records.map(r => r.type)).toEqual([11, 10, 11, 11]);
+      expect(records[0]?.data).toEqual({ source: 4, width: 405, height: 720 });
+      for (const r of records.filter(r => r.type === 11 && r.data.source === 9)) {
         expect(r.data).toMatchObject({ x: 203, y: 360 });
       }
     } finally { f.replay.stop(); }

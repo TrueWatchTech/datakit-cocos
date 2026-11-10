@@ -15,6 +15,7 @@
 
 # Generated from SAMPLE_* environment variables; may contain credentials.
 *.generated.ts*
+/examples/hybrid-creator*/assets/resources/sample-webview.generated.json*
 
 # Local diagnostic projects and experiments; maintained samples live in hybrid-creator{2,3}.
 /examples/creator2/
@@ -36,6 +37,9 @@
 /AGENTS.md
 /docs/
 
+# Customer environment reports are local diagnostic artifacts.
+cocos-env*.json
+
 *.tgz
 .DS_Store
 
@@ -44,3 +48,11 @@
 /packages/*/bin/
 /packages/*/LICENSE
 /packages/*/THIRD_PARTY_NOTICES
+
+# Generated Web bootstrap bundle.
+/packages/cocos/web/bootstrap.js*
+
+# Platform runtime bundled outside the game module graph.
+/packages/cocos/runtime/
+
+/packages/cocos-session-replay/runtime/

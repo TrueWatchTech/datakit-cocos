@@ -1,7 +1,7 @@
 #import "HybridSampleSDK.h"
 #import "HybridSampleEnvironment.generated.h"
 
-#if __has_include("FTMobileSDK.h")
+#if __has_include(<TrueWatchSDK/TrueWatchSDK.h>)
 #import <TrueWatchSDK/TrueWatchSDK.h>
 #import <TrueWatchSDK/TrueWatchSessionReplay.h>
 #else

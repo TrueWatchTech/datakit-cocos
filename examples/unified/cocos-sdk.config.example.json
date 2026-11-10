@@ -1,0 +1,59 @@
+{
+  "configuration": {
+    "sdk": {
+      "datakitUrl": "http://127.0.0.1:9529",
+      "serviceName": "cocos-game",
+      "env": "local"
+    },
+    "rum": {
+      "androidAppId": "replace-with-android-application-id",
+      "iosAppId": "replace-with-ios-application-id",
+      "sessionSamplingRate": 100
+    },
+    "logger": {
+      "logSamplingRate": 100
+    },
+    "trace": {
+      "traceType": "traceparent"
+    },
+    "autoTrack": {
+      "scenes": true,
+      "actions": true,
+      "errors": true,
+      "network": true
+    }
+  },
+  "replay": {
+    "enabled": true,
+    "sessionReplaySamplingRate": 100,
+    "native": {
+      "captureFps": 2,
+      "maxImageDimension": 720,
+      "imagePolicy": {
+        "quality": "medium",
+        "maxFrameBytes": 40960
+      },
+      "touchPrivacy": "hide"
+    },
+    "web": {
+      "captureFps": 2,
+      "maxImageDimension": 720,
+      "quality": "medium",
+      "maxFrameBytes": 40960,
+      "canvasPrivacy": "block"
+    }
+  },
+  "web": {
+    "enabled": true,
+    "configuration": {
+      "web": {
+        "applicationId": "replace-with-web-application-id",
+        "datakitOrigin": "http://127.0.0.1:9529",
+        "outsideViewName": "OutsideCocos",
+        "allowedTracingUrls": [
+          "http://127.0.0.1:9529/"
+        ]
+      }
+    }
+  }
+}

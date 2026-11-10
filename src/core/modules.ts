@@ -10,12 +10,10 @@ import type {
   FTTraceConfig,
   FTUserData,
 } from './types.js';
-import { requireText, validatedSamplingConfig } from './validation.js';
+import { requireText, validatedSamplingConfig, validateWebViewHosts } from './validation.js';
 import {
   FT_COCOS_SDK_BRIDGE_INFO,
   FT_COCOS_SDK_BRIDGE_INFO_KEY,
-  FT_COCOS_SDK_VERSION,
-  FT_COCOS_SDK_VERSION_KEY,
 } from './version.js';
 
 export class FTSDKOwnership {
@@ -84,14 +82,9 @@ export class FTMobileAgent {
     if (!config.datakitUrl && !(config.datawayUrl && config.clientToken)) {
       throw new TypeError('Configure datakitUrl or datawayUrl with clientToken');
     }
+    validateWebViewHosts(config.allowWebViewHost);
     this.ownership.claimStandalone();
-    this.transport.invoke('sdk.configure', compact({
-      ...config,
-      globalContext: {
-        ...(config.globalContext || {}),
-        [FT_COCOS_SDK_VERSION_KEY]: FT_COCOS_SDK_VERSION,
-      },
-    }));
+    this.transport.invoke('sdk.configure', compact(config));
   }
 
   /**

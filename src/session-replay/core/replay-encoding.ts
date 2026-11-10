@@ -46,8 +46,16 @@ export function encodeReplayImageRecord(input: FTReplayImageRecord): {
     shapeStyle: null,
   };
   const records: unknown[] = [];
-  if (input.contextChanged || input.viewportChanged) {
+  if (input.contextChanged) {
     records.push({ type: 4, data: { width: input.width, height: input.height }, timestamp: input.timestamp });
+  } else if (input.viewportChanged) {
+    // Native Replay uses an incremental viewport event for rotation within a
+    // view. Meta records initialize a view and do not replace resize events.
+    records.push({
+      type: 11,
+      data: { source: 4, width: input.width, height: input.height },
+      timestamp: input.timestamp,
+    });
   }
   if (input.contextChanged) {
     records.push({ type: 6, data: { has_focus: true }, timestamp: input.timestamp });

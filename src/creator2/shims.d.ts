@@ -4,3 +4,4 @@ declare const CC_JSB: boolean;
 declare const CC_ANDROID: boolean;
 declare const CC_IOS: boolean;
 
+declare const CC_EDITOR: boolean;

@@ -15,15 +15,17 @@ describe('ReplayPrivacy installation', () => {
     const project = join(root, 'project');
     mkdirSync(join(pkg, 'bin'), { recursive: true });
     mkdirSync(join(pkg, 'native'));
+    cpSync(resolve('packages/cocos/runtime'), join(pkg, 'runtime'), { recursive: true });
     mkdirSync(join(pkg, 'extensions', `creator${creator}`), { recursive: true });
     mkdirSync(join(project, 'assets'), { recursive: true });
     cpSync(resolve('packages/cocos/package.json'), join(pkg, 'package.json'));
     cpSync(resolve('installer/cli.cjs'), join(pkg, 'bin', 'cli.cjs'));
-    for (const helper of ['managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', helper), join(pkg, 'bin', helper));
+    for (const helper of ['project-configuration.cjs', 'managed-assets.cjs', 'legacy-asset-hashes.json']) cpSync(resolve('integrations/shared', helper), join(pkg, 'bin', helper));
     const replayRoot = join(project, 'node_modules', '@truewatchtech', 'cocos-session-replay');
     mkdirSync(replayRoot, { recursive: true });
     cpSync(resolve('packages/cocos-session-replay/package.json'), join(replayRoot, 'package.json'));
     cpSync(resolve('packages/cocos-session-replay/native-integration.json'), join(replayRoot, 'native-integration.json'));
+    cpSync(resolve('packages/cocos-session-replay/runtime'), join(replayRoot, 'runtime'), { recursive: true });
     cpSync(resolve('src/session-replay/native'), join(replayRoot, 'native'), { recursive: true });
     cpSync(resolve('src/session-replay/components'), join(replayRoot, 'components'), { recursive: true });
     const install = () => execFileSync(process.execPath, [

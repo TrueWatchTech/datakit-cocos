@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FTSessionReplay, type FTCanvasCapture } from '../src/session-replay/core/replay';
+import type { FTCapturedFrame, FTStoredFrame } from '../src/session-replay/core/types';
 import { invokeReplayAsync } from '../src/session-replay/core/replay-async-transport';
 import { persistReplayFrame, disposeReplayFrame } from '../src/session-replay/core/replay-file';
 import type { FTNativeTransport } from '../src/core/transport';
@@ -34,6 +35,102 @@ function setup() {
 }
 
 describe('asynchronous Replay lifecycle', () => {
+  it('holds captured pixels without starting storage until the display yield completes', async () => {
+    const state = setup();
+    const gate = deferred<void>();
+    state.capture.deferProcessing = vi.fn(() => gate.promise);
+    const pending = state.replay.captureNow();
+    await vi.waitFor(() => expect(state.capture.deferProcessing).toHaveBeenCalledOnce());
+    expect(state.capture.persist).not.toHaveBeenCalled();
+    expect(state.transport.invokeAsync).not.toHaveBeenCalled();
+    gate.resolve();
+    state.save.resolve('image');
+    state.cleanup.resolve();
+    await expect(pending).resolves.toBe(true);
+    expect(state.capture.persist).toHaveBeenCalledOnce();
+  });
+
+  it('discards a captured frame when stopped during the display yield', async () => {
+    vi.useFakeTimers();
+    const state = setup();
+    const gate = deferred<void>();
+    state.capture.deferProcessing = vi.fn(() => gate.promise);
+    vi.mocked(state.capture.dispose!).mockImplementation(() => gate.resolve());
+    state.replay.start();
+    const pending = state.replay.captureNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.capture.deferProcessing).toHaveBeenCalledOnce();
+    state.replay.stop();
+    await expect(pending).resolves.toBe(false);
+    expect(state.capture.persist).not.toHaveBeenCalled();
+    expect(state.transport.invokeAsync).not.toHaveBeenCalled();
+    expect(state.capture.dispose).toHaveBeenCalledOnce();
+  });
+
+  it.each(['capture', 'persist', 'encode'] as const)(
+    'discards pending %s work across standalone stop/restart and can capture again', async stage => {
+      vi.useFakeTimers();
+      const state = setup();
+      const frame = { rgba: new Uint8Array(16), width: 2, height: 2, timestamp: 1 };
+      const stored = { path: '/frame', width: 2, height: 2, timestamp: 1, fingerprint: 'fp' };
+      const captured = deferred<FTCapturedFrame>();
+      const persisted = deferred<FTStoredFrame>();
+      if (stage === 'capture') vi.mocked(state.capture.capture).mockReturnValueOnce(captured.promise);
+      if (stage === 'persist') vi.mocked(state.capture.persist).mockReturnValueOnce(persisted.promise);
+      state.replay.start();
+      const pending = state.replay.captureNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(state.capture.capture).toHaveBeenCalledOnce();
+      expect(state.capture.persist).toHaveBeenCalledTimes(stage === 'capture' ? 0 : 1);
+      expect(state.transport.invokeAsync).toHaveBeenCalledTimes(stage === 'encode' ? 1 : 0);
+      state.replay.stop();
+      state.replay.start();
+      captured.resolve(frame);
+      persisted.resolve(stored);
+      state.save.resolve('stale-image');
+      state.cleanup.resolve();
+      await expect(pending).resolves.toBe(false);
+      expect(state.capture.disposeStoredFrame).toHaveBeenCalledTimes(stage === 'capture' ? 0 : 1);
+      expect(state.invoke.mock.calls.some(([method]) => method === 'replay.writeSegment')).toBe(false);
+      vi.mocked(state.transport.invokeAsync!).mockResolvedValue('fresh-image');
+      await expect(state.replay.captureNow()).resolves.toBe(true);
+      expect(state.invoke.mock.calls.filter(([method]) => method === 'replay.writeSegment')).toHaveLength(1);
+      state.replay.stop();
+    },
+  );
+
+  it.each(['viewId', 'sessionId'] as const)(
+    'keeps pending image attribution and initializes the next %s even for identical pixels', async key => {
+      const state = setup();
+      const original = { applicationId: 'app', sessionId: 'session', viewId: 'view' };
+      let context = original;
+      state.invoke.mockImplementation(method => method === 'replay.getContext' ? context : undefined);
+      const segments: Array<{ viewId: string; segment: string }> = [];
+      const invoke = state.transport.invoke.bind(state.transport);
+      state.transport.invoke = ((method, payload) => {
+        if (method === 'replay.writeSegment') segments.push(payload as typeof segments[number]);
+        return invoke(method, payload);
+      }) as FTNativeTransport['invoke'];
+      const pending = state.replay.captureNow();
+      await vi.waitFor(() => expect(state.transport.invokeAsync).toHaveBeenCalledOnce());
+      context = { ...original, [key]: 'next' };
+      state.save.resolve('old-context-image');
+      state.cleanup.resolve();
+      await expect(pending).resolves.toBe(true);
+      vi.mocked(state.transport.invokeAsync!).mockResolvedValue('new-context-image');
+      await expect(state.replay.captureNow()).resolves.toBe(true);
+      expect(segments).toHaveLength(2);
+      for (const [index, expected] of [original, context].entries()) {
+        const segment = segments[index]!;
+        const envelope = JSON.parse(segment.segment);
+        expect(segment.viewId).toBe(expected.viewId);
+        expect(envelope).toMatchObject({ applicationID: expected.applicationId, sessionID: expected.sessionId, viewID: expected.viewId });
+        expect(envelope.records.map((record: { type: number }) => record.type)).toEqual([4, 6, 10]);
+        expect(envelope.records[2].data.wireframes[0].resourceId).toBe(index ? 'new-context-image' : 'old-context-image');
+      }
+    },
+  );
+
   it.each(['standalone', 'hybrid', 'rollback'] as const)('releases capture resources on %s shutdown', mode => {
     vi.useFakeTimers();
     const { replay, capture } = setup();

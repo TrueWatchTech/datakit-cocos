@@ -6,7 +6,7 @@ export type { FTAttributes, FTCocosConfig, FTCocosHybridConfig, FTCocosEnterOpti
 type Public<T> = { [K in keyof T]: T[K] };
 
 /** Structural contract shared by the CommonJS and ES module engine builds. */
-export type FTCocosSDK = Omit<Public<SDK>, 'mobile' | 'rum' | 'logger' | 'trace'> & {
+export type FTCocosSDK = Omit<Public<SDK>, 'mobile' | 'rum' | 'logger' | 'trace' | 'lifecycleMode' | 'isCocosEntered'> & {
   mobile: Public<SDK['mobile']>;
   rum: Public<SDK['rum']>;
   logger: Public<SDK['logger']>;

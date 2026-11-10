@@ -1,8 +1,10 @@
 import {
-  _decorator, Camera, Canvas, Color, Component, DirectionalLight, Graphics,
-  Input, Label, Layers, Material, Mesh, MeshRenderer, Node, UITransform, Vec3,
+  _decorator, Button, Camera, Canvas, Color, Component, DirectionalLight, Graphics,
+  Input, Label, Layers, Material, Mesh, MeshRenderer, Node, PointLight, SphereLight, SpotLight, UITransform, Vec3, director,
   input, primitives, resources, utils, view,
 } from 'cc';
+
+import ReplayPrivacy, { ReplayPrivacyMode } from './truewatch-cocos-sdk/ReplayPrivacy';
 
 const { ccclass } = _decorator;
 
@@ -20,7 +22,23 @@ export class Replay3DScene extends Component {
   private onBack?: () => void;
   private baseMaterial!: Material;
 
-  async initialize(onBack: () => void): Promise<void> {
+  private lightCoverage = false;
+  private lightNodes: Node[] = [];
+  private lightNames = ['DirectionalLight', 'PointLight', 'SphereLight', 'SpotLight'];
+  private lightIndex = 0;
+  private lightTint = false;
+  private lightOn = true;
+  private meshMoved = false;
+  private meshVisible = true;
+  private meshPrivacy: 'default' | 'mask' | 'hide' = 'default';
+  private privacy?: ReplayPrivacy;
+  private lightLegend?: Label;
+  private previousAmbient?: number;
+  private trackLight?: (state: string) => void;
+
+  async initialize(onBack: () => void, lightCoverage = false, trackLight?: (state: string) => void): Promise<void> {
+    this.lightCoverage = lightCoverage;
+    this.trackLight = trackLight;
     this.onBack = onBack;
     // An explicit resource dependency keeps the PBR effect in native builds.
     this.baseMaterial = await new Promise<Material>((resolve, reject) => {
@@ -37,6 +55,15 @@ export class Replay3DScene extends Component {
     this.camera.visibility = Layers.Enum.DEFAULT;
     this.camera.clearFlags = Camera.ClearFlag.SOLID_COLOR;
     this.camera.clearColor = new Color(12, 18, 34, 255);
+
+    if (lightCoverage) {
+      cameraNode.setPosition(4, 3, 6);
+      cameraNode.lookAt(new Vec3(0, 0, 0));
+      this.createLightCoverage();
+      this.createHud();
+      this.applyLightState('entered');
+      return;
+    }
 
     const lightNode = this.child('KeyLight');
     lightNode.setRotationFromEuler(-45, -30, 0);
@@ -78,6 +105,11 @@ export class Replay3DScene extends Component {
 
   onDestroy(): void {
     input.off(Input.EventType.TOUCH_END, this.handleTouch, this);
+    if (this.previousAmbient !== undefined) {
+      const scene = director.getScene();
+      if (scene) scene.globals.ambient.skyIllum = this.previousAmbient;
+    }
+    this.trackLight = undefined;
     this.meshes.forEach((mesh) => mesh.destroy());
     this.materials.forEach((material) => material.destroy());
   }
@@ -106,6 +138,7 @@ export class Replay3DScene extends Component {
     material.copy(this.baseMaterial);
     material.setProperty('mainColor', color);
     material.setProperty('roughness', 0.65);
+    if (this.lightCoverage) material.setProperty('metallic', 0);
     this.materials.push(material);
     renderer.setSharedMaterial(material, 0);
     return node;
@@ -152,11 +185,91 @@ export class Replay3DScene extends Component {
     text.addComponent(UITransform).setContentSize(744, 68);
     const label = text.addComponent(Label);
     label.string = '3D REPLAY · INDEPENDENT HUD\nTap left: Back   |   middle: HUD on/off   |   right: Pause';
+    if (this.lightCoverage) this.lightLegend = label;
     label.fontSize = 19;
     label.lineHeight = 28;
     label.color = Color.WHITE;
     label.horizontalAlign = Label.HorizontalAlign.CENTER;
     label.verticalAlign = Label.VerticalAlign.CENTER;
     label.overflow = Label.Overflow.SHRINK;
+    if (this.lightCoverage) {
+      const commands: Array<[string, () => void]> = [
+        ['Next light', () => { this.lightIndex = (this.lightIndex + 1) % this.lightNodes.length; this.applyLightState('light'); }],
+        ['Orange / cyan', () => { this.lightTint = !this.lightTint; this.applyLightState('tint'); }],
+        ['Light on / off', () => { this.lightOn = !this.lightOn; this.applyLightState('light-enabled'); }],
+        ['Mesh move / rotate', () => { this.meshMoved = !this.meshMoved; this.applyLightState('transform'); }],
+        ['Mesh hide / show', () => { this.meshVisible = !this.meshVisible; this.applyLightState('visible'); }],
+        ['Privacy default / mask / hide', () => { this.meshPrivacy = this.meshPrivacy === 'default' ? 'mask' : this.meshPrivacy === 'mask' ? 'hide' : 'default'; this.applyLightState('privacy'); }],
+        ['Reset', () => { this.lightIndex = 0; this.lightTint = false; this.lightOn = true; this.meshMoved = false; this.meshVisible = true; this.meshPrivacy = 'default'; this.applyLightState('reset'); }],
+        ['Back', () => this.returnTo2D()],
+      ];
+      commands.forEach(([caption, click], index) => {
+        const button = new Node('LightCommand' + index);
+        button.layer = Layers.Enum.UI_2D;
+        canvasNode.addChild(button);
+        button.setPosition((index % 4 - 1.5) * size.width / 4, -size.height / 2 + (index < 4 ? 86 : 28));
+        const width = size.width / 4 - 12;
+        button.addComponent(UITransform).setContentSize(width, 44);
+        const graphics = button.addComponent(Graphics);
+        graphics.fillColor = new Color(27, 39, 64);
+        graphics.rect(-width / 2, -22, width, 44);
+        graphics.fill();
+        button.addComponent(Button).transition = Button.Transition.NONE;
+        button.on('click', click);
+        const text = new Node('Caption');
+        text.layer = Layers.Enum.UI_2D;
+        button.addChild(text);
+        text.addComponent(UITransform).setContentSize(width - 8, 40);
+        const label = text.addComponent(Label);
+        label.string = caption;
+        label.color = Color.WHITE;
+        label.fontSize = 15;
+        label.lineHeight = 18;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        label.overflow = Label.Overflow.SHRINK;
+      });
+    }
+  }
+
+  private createLightCoverage(): void {
+    this.paused = true;
+    const ambient = director.getScene()!.globals.ambient;
+    this.previousAmbient = ambient.skyIllum;
+    ambient.skyIllum = 0;
+    this.box('PublicFloor', new Vec3(0, -1.25, 0), new Vec3(7, 0.15, 5), new Color(180, 180, 180));
+    this.cube = this.box('PrivateMeshRenderer', new Vec3(0, 0, 0), new Vec3(1.8, 1.8, 1.8), new Color(235, 235, 235));
+    // A real 3D mesh has no UITransform. Keep that condition for privacy verification.
+    this.privacy = this.cube.addComponent(ReplayPrivacy);
+    this.privacy.enabled = false;
+    this.lightNames.forEach((name, index) => {
+      const node = this.child(name);
+      node.active = false;
+      node.setPosition(2.5, 3.5, 3);
+      node.lookAt(new Vec3(0, 0, 0));
+      if (index === 0) node.addComponent(DirectionalLight).illuminance = 65000;
+      else if (index === 1) { const light = node.addComponent(PointLight); light.range = 9; light.luminance = 5000; }
+      else if (index === 2) { const light = node.addComponent(SphereLight); light.range = 9; light.size = 0.15; light.luminance = 5000; }
+      else { const light = node.addComponent(SpotLight); light.range = 9; light.spotAngle = 70; light.luminance = 5000; }
+      this.lightNodes.push(node);
+    });
+  }
+
+  private applyLightState(stage: string): void {
+    this.cube.active = this.meshVisible;
+    this.cube.setPosition(this.meshMoved ? 0.7 : 0, this.meshMoved ? 0.2 : 0, 0);
+    this.cube.setRotationFromEuler(this.meshMoved ? 20 : 0, this.meshMoved ? 38 : 0, this.meshMoved ? 12 : 0);
+    this.lightNodes.forEach((node, index) => {
+      node.active = index === this.lightIndex && this.lightOn;
+      const light = node.getComponent(DirectionalLight) || node.getComponent(PointLight) || node.getComponent(SphereLight) || node.getComponent(SpotLight);
+      if (light) light.color = this.lightTint ? new Color(40, 220, 255) : new Color(255, 90, 40);
+    });
+    if (this.privacy) {
+      this.privacy.mode = this.meshPrivacy === 'hide' ? ReplayPrivacyMode.Hide : ReplayPrivacyMode.Mask;
+      this.privacy.enabled = this.meshPrivacy !== 'default';
+    }
+    const state = this.lightNames[this.lightIndex] + ' / ' + (this.lightTint ? 'cyan' : 'orange') + ' / light:' + this.lightOn + ' / mesh:' + this.meshVisible + ' / moved:' + this.meshMoved + ' / privacy:' + this.meshPrivacy;
+    if (this.lightLegend) this.lightLegend.string = '3D mesh + four real lights · batch 08\n' + state;
+    this.trackLight?.(stage + ' / ' + state);
   }
 }

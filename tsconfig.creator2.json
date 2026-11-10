@@ -4,10 +4,22 @@
     "target": "ES5",
     "module": "CommonJS",
     "moduleResolution": "Node",
-    "lib": ["ES2015", "DOM"],
+    "lib": [
+      "ES2015",
+      "DOM"
+    ],
     "rootDir": "src",
     "outDir": "packages/cocos/dist/creator2",
-    "sourceMap": true
+    "sourceMap": true,
+    "inlineSources": true
   },
-  "include": ["src/core/**/*.ts", "src/creator2/**/*.ts"]
+  "include": [
+    "src/core/**/*.ts",
+    "src/creator2/**/*.ts",
+    "src/web/**/*.ts",
+    "src/native/**/*.ts"
+  ],
+  "exclude": [
+    "src/web/creator3.ts"
+  ]
 }

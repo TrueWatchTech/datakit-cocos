@@ -1,0 +1,24 @@
+{
+  "web": {
+    "enabled": true,
+    "configuration": {
+      "web": {
+        "applicationId": "replace-with-web-application-id",
+        "datakitOrigin": "http://127.0.0.1:9529",
+        "outsideViewName": "OutsideCocos",
+        "allowedTracingUrls": ["http://127.0.0.1:9529/"],
+        "replay": {
+          "enabled": true,
+          "sessionReplaySamplingRate": 100,
+          "canvasPrivacy": "block",
+          "captureFps": 1
+        }
+      },
+      "sdk": { "serviceName": "cocos-web", "env": "local" },
+      "rum": { "sessionSamplingRate": 100 },
+      "logger": { "logSamplingRate": 100 },
+      "trace": { "traceType": "traceparent" },
+      "autoTrack": { "scenes": true, "actions": true, "errors": true, "network": true }
+    }
+  }
+}

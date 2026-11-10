@@ -1,7 +1,6 @@
 package com.truewatch.cocos.sample;
 
 import android.app.Activity;
-import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -26,7 +25,6 @@ import okhttp3.Response;
 
 /** Native landing page used to verify native and Cocos telemetry in one app. */
 public final class HybridSampleNativeActivity extends Activity {
-    private static final String COCOS_ACTIVITY = "org.cocos2dx.javascript.AppActivity";
     private static final String AUTO_REQUEST_URL =
             "https://httpbin.org/get?sample=cocos-hybrid-creator2&layer=native-auto";
     private static final String COCOS_HTTP_URL = "https://httpbin.org/get";
@@ -113,12 +111,9 @@ public final class HybridSampleNativeActivity extends Activity {
     }
 
     private void openCocos() {
-        status.setText("Opening Cocos page…");
-        Intent intent = new Intent();
-        intent.setClassName(getPackageName(), COCOS_ACTIVITY);
-        // Creator 2's Cocos2dxActivity requires itself to be the task root.
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        startActivity(intent);
+        // This page covers the existing Cocos task root in the same process.
+        // Resume that Activity instead of creating a second engine instance.
+        finish();
     }
 
     private void requestWithOkHttp() {

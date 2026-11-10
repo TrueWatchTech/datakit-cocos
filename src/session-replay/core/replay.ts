@@ -23,6 +23,8 @@ import {
 export interface FTCanvasCapture {
   getViewportSize?(): { width: number; height: number } | undefined;
   capture(maxImageDimension: number): Promise<FTCapturedFrame | undefined>;
+  /** Let the display present before CPU processing of an already captured frame. */
+  deferProcessing?(): Promise<void>;
   persist(frame: FTCapturedFrame, fingerprint: string): Promise<FTStoredFrame>;
   disposeStoredFrame(frame: FTStoredFrame): void | Promise<void>;
   /** Cancel pending GPU capture and release reusable capture resources. */
@@ -40,6 +42,10 @@ export interface FTReplayPointerEvent {
 
 export interface FTReplayPointerSource {
   onReplayPointer(callback: (event: FTReplayPointerEvent) => void): () => void;
+}
+
+interface FTContextPointerEvent extends FTReplayPointerEvent {
+  contextKey: string;
 }
 
 const MAX_PENDING_POINTER_EVENTS = 512;
@@ -88,7 +94,7 @@ export class FTSessionReplay {
   private supportsSaveImageV2: boolean | undefined;
   private recordCounts = new Map<string, number>();
   private recordTouches = false;
-  private pendingPointerEvents: FTReplayPointerEvent[] = [];
+  private pendingPointerEvents: FTContextPointerEvent[] = [];
   private stopPointerTracking: (() => void) | undefined;
 
   constructor(
@@ -205,7 +211,10 @@ export class FTSessionReplay {
     try {
       context = this.readContext();
       if (!context) return false;
-      const contextKey = `${context.applicationId}:${context.sessionId}:${context.viewId}`;
+      const contextKey = replayContextKey(context);
+      // Unsent touches from a previous context have no current frame to attach
+      // to. New-context touches arriving during this capture remain queued.
+      this.pendingPointerEvents = this.pendingPointerEvents.filter(event => event.contextKey === contextKey);
       const contextChanged = contextKey !== this.lastContextKey;
       const viewportSize = this.capture.getViewportSize?.();
       const viewportChanged = this.lastViewportSize !== undefined
@@ -226,6 +235,13 @@ export class FTSessionReplay {
       const frame = await this.capture.capture(this.imagePolicy.maxImageDimension);
       if (generation !== this.captureGeneration) return false;
       if (!frame) return false;
+      // Capture, comparison and the native storage handoff must not consume one
+      // display frame together. Engines can yield across presentation here;
+      // generation checks prevent a stopped recorder from resuming old work.
+      if (this.capture.deferProcessing) {
+        await this.capture.deferProcessing();
+        if (generation !== this.captureGeneration) return false;
+      }
       // Native encoding may shrink the resource to meet the per-image limit, but
       // the replay canvas, image bounds and touch coordinates stay in one
       // logical space based on the configured maximum size.
@@ -266,7 +282,8 @@ export class FTSessionReplay {
         return pointerSize ? this.writePendingPointers(context, pointerSize.width, pointerSize.height) : false;
       }
 
-      const pendingPointers = this.scaledPendingPointers(displaySize.width, displaySize.height);
+      const pendingEvents = this.pointersForContext(context);
+      const pendingPointers = this.scaledPointers(pendingEvents, displaySize.width, displaySize.height);
       const encoded = encodeReplayImageRecord({
         context,
         resourceId: saved.resourceId,
@@ -282,6 +299,7 @@ export class FTSessionReplay {
         viewId: context.viewId,
         segment: encoded.segment,
       });
+      this.consumePointers(pendingEvents);
       emitReplayDiagnostic({
         type: 'segment_encoded',
         timestamp: now,
@@ -291,7 +309,6 @@ export class FTSessionReplay {
         hasImage: true,
       });
       this.updateRecordCount(context.viewId, encoded.recordCount);
-      this.pendingPointerEvents.splice(0, pendingPointers.length);
       emitReplayDiagnostic({
         type: 'image_saved',
         timestamp: now,
@@ -344,13 +361,23 @@ export class FTSessionReplay {
     this.recordCounts.clear();
     this.pendingPointerEvents = [];
     if (this.recordTouches && this.pointerSource) {
+      const generation = this.captureGeneration;
       this.stopPointerTracking = this.pointerSource.onReplayPointer((event) => {
+        if (!this.running || generation !== this.captureGeneration) return;
+        let context: FTRUMContext | undefined;
+        try {
+          context = this.readContext();
+        } catch {
+          // A touch without reliable ownership must not interrupt business input.
+          return;
+        }
+        if (!context) return;
         emitReplayDiagnostic({
           type: 'pointer_received',
           timestamp: event.timestamp,
           eventType: event.eventType,
         });
-        this.pendingPointerEvents.push(event);
+        this.pendingPointerEvents.push({ ...event, contextKey: replayContextKey(context) });
         if (this.pendingPointerEvents.length > MAX_PENDING_POINTER_EVENTS) {
           this.pendingPointerEvents.splice(0, this.pendingPointerEvents.length - MAX_PENDING_POINTER_EVENTS);
         }
@@ -457,13 +484,15 @@ export class FTSessionReplay {
   }
 
   private writePendingPointers(context: FTRUMContext, width: number, height: number): boolean {
-    const pointerEvents = this.scaledPendingPointers(width, height);
+    const pendingEvents = this.pointersForContext(context);
+    const pointerEvents = this.scaledPointers(pendingEvents, width, height);
     if (pointerEvents.length === 0) return false;
     const encoded = encodeReplayPointerRecords({ context, pointerEvents });
     this.transport.invoke('replay.writeSegment', {
       viewId: context.viewId,
       segment: encoded.segment,
     });
+    this.consumePointers(pendingEvents);
     emitReplayDiagnostic({
       type: 'segment_encoded',
       timestamp: Date.now(),
@@ -473,12 +502,21 @@ export class FTSessionReplay {
       hasImage: false,
     });
     this.updateRecordCount(context.viewId, encoded.recordCount);
-    this.pendingPointerEvents.splice(0, pointerEvents.length);
     return true;
   }
 
-  private scaledPendingPointers(width: number, height: number): FTReplayPointerRecord[] {
-    return this.pendingPointerEvents.map((event) => ({
+  private pointersForContext(context: FTRUMContext): FTContextPointerEvent[] {
+    const key = replayContextKey(context);
+    return this.pendingPointerEvents.filter(event => event.contextKey === key);
+  }
+
+  private consumePointers(events: FTContextPointerEvent[]): void {
+    const sent = new Set(events);
+    this.pendingPointerEvents = this.pendingPointerEvents.filter(event => !sent.has(event));
+  }
+
+  private scaledPointers(events: FTContextPointerEvent[], width: number, height: number): FTReplayPointerRecord[] {
+    return events.map((event) => ({
       eventType: event.eventType,
       pointerId: event.pointerId,
       x: Math.round(clamp(event.normalizedX, 0, 1) * width),
@@ -492,6 +530,10 @@ export class FTSessionReplay {
     this.recordCounts.set(viewId, count);
     this.transport.invoke('replay.setRecordCount', { viewId, count });
   }
+}
+
+function replayContextKey(context: FTRUMContext): string {
+  return JSON.stringify([context.applicationId, context.sessionId, context.viewId]);
 }
 
 function scaledReplayViewport(size: { width: number; height: number }, maxDimension: number): { width: number; height: number } {
@@ -637,6 +679,8 @@ function privacyRegionsKey(regions: FTPrivacyRegion[]): string {
 }
 
 export function frameFingerprint(bytes: Uint8Array): string {
+  const bridge = (globalThis as { __ftCocosReplayFile?: { fingerprint?(pixels: Uint8Array): string } }).__ftCocosReplayFile;
+  if (typeof bridge?.fingerprint === 'function') return bridge.fingerprint(bytes);
   let hash = 2166136261;
   // Sparse hashing can classify changes between sampled bytes as duplicates,
   // bypassing both local motion detection and the approximate refresh limit.

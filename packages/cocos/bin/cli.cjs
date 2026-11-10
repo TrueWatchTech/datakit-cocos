@@ -35,12 +35,19 @@ if (manager !== undefined && !['spm', 'cocoapods'].includes(manager)) {
 }
 const configFile = path.join(projectRoot, 'cocos-sdk.config.json');
 const config = readJson(configFile) || {};
+const projectConfiguration = require('./project-configuration.cjs');
 if (rawArguments.includes('--replay') && rawArguments.includes('--no-replay')) fail('Choose either --replay or --no-replay.');
+if (rawArguments.includes('--web') && rawArguments.includes('--no-web')) fail('Choose either --web or --no-web.');
+const webEnabled = rawArguments.includes('--web') ? true : rawArguments.includes('--no-web') ? false : config.web?.enabled === true;
 const replayEnabled = rawArguments.includes('--replay') ? true
   : rawArguments.includes('--no-replay') ? false : config.replay?.enabled === true;
+const effectiveConfig = { ...config, web: { ...config.web, enabled: webEnabled }, replay: { ...config.replay, enabled: replayEnabled } };
+const nativeReplayEnabled = projectConfiguration.nativeReplayEnabled(effectiveConfig);
+const nativeConfiguration = projectConfiguration.resolveNativeConfiguration(effectiveConfig);
+const webConfiguration = projectConfiguration.resolveWebConfiguration(effectiveConfig);
 let replayRoot;
 let replayDescriptor;
-if (replayEnabled) {
+if (nativeReplayEnabled) {
   try {
     const projectRequire = createRequire(path.join(projectRoot, 'package.json'));
     replayRoot = path.dirname(projectRequire.resolve('@truewatchtech/cocos-session-replay/package.json'));
@@ -57,10 +64,33 @@ if (replayEnabled) {
 const sources = [{ root: extensionSource }, { root: path.join(packageRoot, 'native'), prefix: 'native/' }];
 if (replayRoot) sources.push({ root: path.join(replayRoot, 'native'), prefix: 'replay-native/' });
 const generated = {
-  'sdk-integration.json': JSON.stringify({ schemaVersion: 1, version: metadata.version, replay: replayEnabled }, null, 2) + '\n',
+  'sdk-integration.json': JSON.stringify({ schemaVersion: 1, version: metadata.version, replay: nativeReplayEnabled }, null, 2) + '\n',
 };
+if (webEnabled) {
+  try { Object.assign(generated, require('./web-assets.cjs').webAssets(projectRoot, packageRoot, webConfiguration)); }
+  catch (error) { fail(error.message); }
+}
 if (replayDescriptor) generated['replay-integration.json'] = JSON.stringify(replayDescriptor, null, 2) + '\n';
 syncManagedDirectory(destination, sources, generated);
+// Install once with platform metadata; switching build targets never rewrites game imports.
+const nativePluginFlags = { isPlugin: true, loadPluginInWeb: false, loadPluginInNative: true, loadPluginInEditor: true, ...(creatorMajor === 3 ? { loadPluginInMiniGame: false } : {}) };
+const nativePluginMeta = creatorMajor === 2
+  ? { ver: '1.0.8', uuid: '22890dac-cd02-4da1-817a-f4eb4468a2c3', importer: 'javascript', ...nativePluginFlags, subMetas: {} }
+  : { ver: '4.0.24', uuid: '22890dac-cd02-4da1-817a-f4eb4468a2c3', importer: 'javascript', imported: true, files: [], subMetas: {}, userData: { ...nativePluginFlags, simulateGlobals: [] } };
+const runtimeDirectory = path.join(projectRoot, 'assets', 'truewatch-cocos-sdk-runtime');
+const nativeMetaFile = path.join(runtimeDirectory, 'native.js.meta');
+// Creator upgrades metadata versions and adds importer fields. Preserve those edits and the asset UUID.
+const existingMeta = readJson(nativeMetaFile);
+const existingFlags = creatorMajor === 2 ? existingMeta : existingMeta?.userData;
+if (existingMeta && Object.entries(nativePluginFlags).some(([key, value]) => existingFlags?.[key] !== value)) {
+  fail('The SDK native runtime must remain a plugin loaded only on native platforms and in the Editor. Restore its import settings before reinstalling.');
+}
+syncManagedDirectory(runtimeDirectory, [], {
+  'native.js': fs.readFileSync(path.join(packageRoot, 'runtime', 'native.js'), 'utf8')
+    + (replayRoot ? fs.readFileSync(path.join(replayRoot, 'runtime', `creator${creatorMajor}.js`), 'utf8') : '')
+    + projectConfiguration.nativeConfigurationScript(nativeConfiguration),
+});
+if (!existingMeta) fs.writeFileSync(nativeMetaFile, JSON.stringify(nativePluginMeta, null, 2) + '\n');
 const componentDestination = path.join(projectRoot, 'assets', 'truewatch-cocos-sdk');
 if (replayRoot) syncManagedDirectory(componentDestination, [{ root: path.join(replayRoot, 'components', `creator${creatorMajor}`) }]);
 // Keep existing component scripts and .meta files when disabling Replay: scenes may reference them.
@@ -68,13 +98,15 @@ if (manager !== undefined) config.ios = { ...config.ios, dependencyManager: mana
 if (rawArguments.includes('--replay') || rawArguments.includes('--no-replay') || config.replay) {
   config.replay = { ...config.replay, enabled: replayEnabled };
 }
-if (manager !== undefined || rawArguments.includes('--replay') || rawArguments.includes('--no-replay')) {
+if (rawArguments.includes('--web') || rawArguments.includes('--no-web')) config.web = { ...config.web, enabled: webEnabled };
+if (manager !== undefined || ['--replay', '--no-replay', '--web', '--no-web'].some(flag => rawArguments.includes(flag))) {
   fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`);
 }
 process.stdout.write(
   `Installed ${metadata.name} for Cocos Creator ${creatorMajor} at ${destination} (Replay: ${replayEnabled ? 'enabled' : 'disabled'})\n`
-  + (replayEnabled ? `Installed ReplayPrivacy at ${componentDestination}. Add it through Session Replay/ReplayPrivacy in the component menu.\n` : '')
-  + 'Re-open Cocos Creator, enable the truewatch-cocos-sdk extension, and rebuild the native project.\n',
+  + (replayRoot ? `Installed ReplayPrivacy at ${componentDestination}. Add it through Session Replay/ReplayPrivacy in the component menu.\n` : '')
+  + (webEnabled ? 'Web: import @truewatchtech/cocos-sdk/creator' + creatorMajor + ' and call start() to use project settings.\n' : '')
+  + 'Re-open Cocos Creator, enable the truewatch-cocos-sdk extension, and rebuild the project.\n',
 );
 for (const duplicate of findDuplicateExtensions(path.join(projectRoot, container), destination)) {
   process.stderr.write(
@@ -154,10 +186,15 @@ function printHelp() {
     'Options:',
     '  --project <path>  Cocos project root (defaults to the current directory)',
     '  --creator <2|3>   Override automatic Cocos Creator version detection',
+    '  --web            Install Browser bundles using cocos-sdk.config.json',
+    '  --no-web         Disable Web bootstrap integration',
     '  --replay         Include the separately installed Session Replay package',
     '  --no-replay      Remove SDK-managed Replay native integration on rebuild',
     '  --ios-dependency-manager <spm|cocoapods>  Save the iOS dependency manager in cocos-sdk.config.json',
     '  -h, --help        Show this help',
+    '',
+    'Project settings: configuration supplies native/shared settings; web.configuration supplies Web connection settings.',
+    'Replay settings: replay.enabled, shared sampling, replay.native and replay.web. Call the SDK start() method to use them.',
     '',
   ].join('\n'));
 }

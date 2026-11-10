@@ -36,6 +36,38 @@ afterEach(() => {
 });
 
 describe('Complete Hybrid Creator sample projects', () => {
+  it.skipIf(process.platform !== 'darwin').each(projects)(
+    '$root native host imports compile with CocoaPods and SwiftPM header layouts',
+    (project) => {
+      const source = sourceAt(`${project.root}/native-host/ios/HybridSampleSDK.m`);
+      const imports = source.match(/^#if __has_include[\s\S]*?^#endif/m)?.[0];
+      expect(imports).toBeDefined();
+
+      for (const layout of ['cocoapods', 'spm']) {
+        const directory = mkdtempSync(path.join(tmpdir(), 'cocos-host-headers-'));
+        temporaryDirectories.push(directory);
+        writeFileSync(path.join(directory, 'FTMobileSDK.h'), '');
+        if (layout === 'cocoapods') {
+          mkdirSync(path.join(directory, 'TrueWatchSDK'));
+          writeFileSync(path.join(directory, 'TrueWatchSDK/TrueWatchSDK.h'), 'typedef int SDKImport;');
+          writeFileSync(path.join(directory, 'TrueWatchSDK/TrueWatchSessionReplay.h'), 'typedef int ReplayImport;');
+        } else {
+          for (const name of ['FTMobileAgent', 'FTSDKConfig', 'FTRumConfig', 'FTLoggerConfig', 'FTMobileConfig', 'FTSessionReplay']) {
+            writeFileSync(path.join(directory, `${name}.h`),
+              name === 'FTMobileAgent' ? 'typedef int SDKImport;'
+                : name === 'FTSessionReplay' ? 'typedef int ReplayImport;' : '');
+          }
+        }
+        const output = execFileSync('/usr/bin/clang', ['-E', '-P', '-x', 'objective-c', '-I', directory, '-'], {
+          input: imports,
+          encoding: 'utf8',
+        });
+        expect(output).toContain('typedef int SDKImport;');
+        expect(output).toContain('typedef int ReplayImport;');
+      }
+    },
+  );
+
   it.each(projects)('$root consumes the local SDK and binds its startup scene', (project) => {
     const packageJson = JSON.parse(sourceAt(`${project.root}/package.json`));
     expect(packageJson.dependencies['@truewatchtech/cocos-sdk']).toBe('file:../../packages/cocos');
@@ -81,14 +113,18 @@ describe('Complete Hybrid Creator sample projects', () => {
     expect(application).toContain('FTAutoTrack.startApp(this)');
   });
 
-  it('isolates the Creator 2 engine process while the main process uploads data', () => {
+  it('keeps Creator 2 alive while a native page covers it in the same process', () => {
     const nativeActivity = sourceAt(
       'examples/hybrid-creator2/native-host/android/HybridSampleNativeActivity.java',
     );
     const sdk = sourceAt('examples/hybrid-creator2/native-host/android/HybridSampleSdk.java');
-    expect(nativeActivity).toContain('Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK');
-    expect(sdk).toContain('Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK');
-    expect(sdk).toContain('.setOnlySupportMainProcess(false)');
+    expect(nativeActivity).not.toContain('FLAG_ACTIVITY_CLEAR_TASK');
+    expect(sdk).not.toContain('FLAG_ACTIVITY_CLEAR_TASK');
+    expect(nativeActivity).toContain('finish();');
+    expect(nativeActivity).not.toContain('FLAG_ACTIVITY_NEW_TASK');
+    expect(sdk).not.toContain('FLAG_ACTIVITY_NEW_TASK');
+    expect(sdk).not.toContain('finishAndRemoveTask');
+    expect(sdk).not.toContain('.setOnlySupportMainProcess(false)');
     expect(sourceAt('examples/hybrid-creator2/assets/Script/HybridTelemetrySample.ts')).toContain(
       'cc.director.once(cc.Director.EVENT_AFTER_DRAW',
     );
@@ -124,13 +160,58 @@ describe('Complete Hybrid Creator sample projects', () => {
     }
   });
 
-  it.each([
-    { creator: 2, extensionDirectory: 'packages', cocosActivity: 'org.cocos2dx.javascript.AppActivity' },
-    { creator: 3, extensionDirectory: 'extensions', cocosActivity: 'com.cocos.game.AppActivity' },
-  ])('installs the Creator $creator native owner idempotently', ({ creator, extensionDirectory, cocosActivity }) => {
+  it.each([2, 3])('preserves Creator %i reflection rules across reinstall and regeneration', (creator) => {
     const project = temporaryRoot();
     const build = path.join(project, 'build/native');
-    writeFixture(project, build, extensionDirectory, cocosActivity);
+    const extension = creator === 2 ? 'packages' : 'extensions';
+    const activity = creator === 2 ? 'org.cocos2dx.javascript.AppActivity' : 'com.cocos.game.AppActivity';
+    const install = () => execFileSync(process.execPath, [
+      'scripts/install-hybrid-host.mjs', '--project', project,
+      '--creator', String(creator), '--build-root', build,
+    ], { cwd: process.cwd(), stdio: 'pipe' });
+    const gradleFile = path.join(build, 'android/app/build.gradle');
+    const rulesFile = path.join(build, 'android/app/cocos-hybrid-proguard.pro');
+    const customFile = path.join(build, 'android/app/proguard-rules.pro');
+    const customRules = '# Application rules\n-keep class example.Custom { *; }\n';
+    for (const custom of [false, true]) {
+      writeFixture(project, build, extension, activity, false);
+      if (custom) {
+        write(customFile, customRules);
+        write(gradleFile, "android { buildTypes { release { minifyEnabled true; proguardFile 'proguard-rules.pro' } } }\n");
+      }
+      install();
+      const gradle = readFileSync(gradleFile, 'utf8');
+      const rules = readFileSync(rulesFile, 'utf8');
+      expect(gradle).toContain("buildTypes { release { proguardFile 'cocos-hybrid-proguard.pro' } }");
+      expect(rules).toContain('-keep class com.truewatch.cocos.sample.HybridSampleSdk {');
+      expect(rules).toContain('public static void returnToNative();');
+      expect(rules).toContain('public static boolean isNativePageVisible();');
+      expect(rules).not.toContain('*');
+      install();
+      expect(readFileSync(gradleFile, 'utf8')).toBe(gradle);
+      expect(readFileSync(rulesFile, 'utf8')).toBe(rules);
+      if (custom) {
+        expect(readFileSync(customFile, 'utf8')).toBe(customRules);
+        expect(gradle).toContain("minifyEnabled true; proguardFile 'proguard-rules.pro'");
+      }
+      // Simulate a new Creator export replacing Gradle and the managed rules.
+      writeFixture(project, build, extension, activity, false);
+      write(rulesFile, '# stale generated file\n');
+      install();
+      expect(readFileSync(rulesFile, 'utf8')).toBe(rules);
+      expect(count(readFileSync(gradleFile, 'utf8'), "proguardFile 'cocos-hybrid-proguard.pro'")).toBe(1);
+      if (custom) expect(readFileSync(customFile, 'utf8')).toBe(customRules);
+    }
+  });
+
+  it.each([
+    { creator: 2, extensionDirectory: 'packages', cocosActivity: 'org.cocos2dx.javascript.AppActivity', legacyTask: false },
+    { creator: 2, extensionDirectory: 'packages', cocosActivity: 'org.cocos2dx.javascript.AppActivity', legacyTask: true },
+    { creator: 3, extensionDirectory: 'extensions', cocosActivity: 'com.cocos.game.AppActivity', legacyTask: false },
+  ])('installs the Creator $creator native owner idempotently (legacy task: $legacyTask)', ({ creator, extensionDirectory, cocosActivity, legacyTask }) => {
+    const project = temporaryRoot();
+    const build = path.join(project, 'build/native');
+    writeFixture(project, build, extensionDirectory, cocosActivity, legacyTask);
 
     const argumentsList = [
       'scripts/install-hybrid-host.mjs',
@@ -156,6 +237,9 @@ describe('Complete Hybrid Creator sample projects', () => {
       expect(cmake).not.toContain('PAGE_ALIGNMENT');
     }
 
+    const iosCmake = readFileSync(path.join(build, 'ios/CMakeLists.txt'), 'utf8');
+    expect(count(iosCmake, 'COCOS_SAMPLE_METAL_BEGIN')).toBe(creator === 3 ? 1 : 0);
+
     const activity = readFileSync(path.join(build, 'android/app/src/AppActivity.java'), 'utf8');
     const appDelegate = readFileSync(path.join(build, 'ios/AppDelegate.mm'), 'utf8');
     const gradle = readFileSync(path.join(build, 'android/app/build.gradle'), 'utf8');
@@ -164,8 +248,26 @@ describe('Complete Hybrid Creator sample projects', () => {
     const podfile = readFileSync(path.join(build, 'ios/Podfile'), 'utf8');
     expect(activity).toContain('import com.truewatch.cocos.sample.HybridSampleSdk;');
     expect(activity).toContain('HybridSampleSdk.start();');
+    expect(count(activity, 'COCOS_HYBRID_STENCIL_BEGIN')).toBe(creator === 2 ? 1 : 0);
+    if (creator === 2) expect(activity).toContain('view.setEGLConfigChooser(5, 6, 5, 0, 16, 8);');
     expect(appDelegate).toContain('#import <HybridSampleHost/HybridSampleSDK.h>');
     expect(appDelegate).toContain('[HybridSampleSDK start];');
+    if (process.platform === 'darwin') {
+      const imports = appDelegate.match(/^#if __has_include[\s\S]*?^#endif/m)?.[0];
+      expect(imports).toBeDefined();
+      for (const layout of ['cocoapods', 'spm']) {
+        const headers = temporaryRoot();
+        const header = layout === 'cocoapods'
+          ? path.join(headers, 'HybridSampleHost/HybridSampleSDK.h')
+          : path.join(headers, 'HybridSampleSDK.h');
+        write(header, 'typedef int HostImport;');
+        const output = execFileSync('/usr/bin/clang', ['-E', '-P', '-x', 'objective-c', '-I', headers, '-'], {
+          input: imports,
+          encoding: 'utf8',
+        });
+        expect(output).toContain('typedef int HostImport;');
+      }
+    }
     expect(gradle).toContain("sourceSets { main.java.srcDirs += ['");
     expect(gradle).toContain("apply plugin: 'ft-plugin'");
     expect(gradle).toContain("implementation 'com.squareup.okhttp3:okhttp:4.5.0'");
@@ -175,11 +277,21 @@ describe('Complete Hybrid Creator sample projects', () => {
     expect(manifest).toContain('android:name="com.truewatch.cocos.sample.HybridSampleNativeActivity"');
     expect(manifest).toContain('android:name="com.truewatch.cocos.sample.HybridSampleApplication"');
     if (creator === 2) {
-      expect(manifest).toContain('android:process=":cocos"');
-      expect(manifest).toContain('android:name="com.ft.sdk.cocos.FTCocosBridgeProvider"');
-      expect(manifest).toContain('android:authorities="${applicationId}.ft.cocos.bridge"');
+      expect(manifest).not.toContain('android:process=');
+      const cocosTag = manifest.match(/<activity\b[^>]*android:name="org.cocos2dx.javascript.AppActivity"[^>]*>/)?.[0] || '';
+      expect(cocosTag).toContain('android:taskAffinity=""');
+      expect(cocosTag).toContain('android:launchMode="singleTask"');
+      expect(count(cocosTag, 'android:taskAffinity=')).toBe(1);
+      expect(count(cocosTag, 'android:launchMode=')).toBe(1);
+      expect(manifest).not.toContain('com.ft.sdk.cocos.FTCocosBridgeProvider');
+      const cocosElement = manifest.match(/<activity\b[^>]*android:name="org.cocos2dx.javascript.AppActivity"[\s\S]*?<\/activity>/)?.[0] || '';
+      expect(cocosElement).toContain('android.intent.category.LAUNCHER');
+      const nativeTag = manifest.match(/<activity\b[^>]*android:name="com.truewatch.cocos.sample.HybridSampleNativeActivity"[^>]*>/)?.[0] || '';
+      expect(nativeTag).toContain('android:launchMode="standard"');
+      expect(nativeTag).toContain('android:exported="false"');
     } else {
       expect(manifest).not.toContain('android:process=":cocos"');
+      expect(manifest).not.toContain('android:taskAffinity="${applicationId}.cocos"');
       expect(manifest).not.toContain('android:name="com.ft.sdk.cocos.FTCocosBridgeProvider"');
     }
     expect(manifest.match(/android.intent.category.LAUNCHER/g)).toHaveLength(1);
@@ -192,6 +304,27 @@ describe('Complete Hybrid Creator sample projects', () => {
     expect(count(manifest, 'android:name="com.truewatch.cocos.sample.HybridSampleNativeActivity"')).toBe(1);
     expect(count(podfile, 'COCOS_HYBRID_SAMPLE_BEGIN')).toBe(1);
   });
+  it('preserves Creator 2 custom surface creation and EGL attributes', () => {
+    const project = temporaryRoot();
+    const build = path.join(project, 'build/native');
+    writeFixture(project, build, 'packages', 'org.cocos2dx.javascript.AppActivity', false);
+    const file = path.join(build, 'android/app/src/AppActivity.java');
+    const customView = [
+      '  @Override public org.cocos2dx.lib.Cocos2dxGLSurfaceView onCreateView() {',
+      '    org.cocos2dx.lib.Cocos2dxGLSurfaceView view = new org.cocos2dx.lib.Cocos2dxGLSurfaceView(this);',
+      '    view.setEGLConfigChooser(8, 8, 8, 8, 24, 8);',
+      '    return view;',
+      '  }',
+    ].join('\n');
+    write(file, readFileSync(file, 'utf8').replace(/\}\s*$/, `${customView}\n}\n`));
+    const args = ['scripts/install-hybrid-host.mjs', '--project', project, '--creator', '2', '--build-root', build];
+    execFileSync(process.execPath, args, { cwd: process.cwd(), stdio: 'pipe' });
+    execFileSync(process.execPath, args, { cwd: process.cwd(), stdio: 'pipe' });
+    const activity = readFileSync(file, 'utf8');
+    expect(activity).toContain(customView);
+    expect(count(activity, 'onCreateView()')).toBe(1);
+    expect(activity).not.toContain('COCOS_HYBRID_STENCIL_BEGIN');
+  });
 });
 
 function writeFixture(
@@ -199,6 +332,7 @@ function writeFixture(
   build: string,
   extensionDirectory: string,
   cocosActivity: string,
+  legacyTask: boolean,
 ): void {
   write(path.join(project, extensionDirectory, 'truewatch-cocos-sdk/install-native.cjs'), 'exports.installNative = () => {};\n');
   for (const relativePath of [
@@ -213,6 +347,10 @@ function writeFixture(
   ]) {
     write(path.join(project, 'native-host', relativePath), `fixture: ${relativePath}\n`);
   }
+  write(path.join(build, 'ios/CMakeLists.txt'), 'project(Sample)\n');
+  if (extensionDirectory === 'extensions') {
+    write(path.join(project, 'native-host/cmake/MetalVertexFormats.cmake'), '# Metal fixture\n');
+  }
   write(path.join(build, 'android/build.gradle'), [
     'buildscript {',
     '  repositories {}',
@@ -226,12 +364,23 @@ function writeFixture(
   write(path.join(build, 'android/app/AndroidManifest.xml'), [
     '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
     '  <application>',
-    `    <activity android:name="${cocosActivity}" android:exported="true">`,
-    '      <intent-filter>',
-    '        <action android:name="android.intent.action.MAIN"/>',
-    '        <category android:name="android.intent.category.LAUNCHER"/>',
-    '      </intent-filter>',
+    `    <activity android:name="${cocosActivity}" android:exported="true"${legacyTask
+      ? ' android:process=":old" android:taskAffinity="legacy.shared" android:launchMode="standard"' : ''}>`,
+    ...(legacyTask ? [] : [
+      '      <intent-filter>',
+      '        <action android:name="android.intent.action.MAIN"/>',
+      '        <category android:name="android.intent.category.LAUNCHER"/>',
+      '      </intent-filter>',
+    ]),
     '    </activity>',
+    ...(legacyTask ? [
+      '<!-- COCOS_HYBRID_NATIVE_PAGE_BEGIN -->',
+      '<provider android:name="com.ft.sdk.cocos.FTCocosBridgeProvider" android:authorities="${applicationId}.ft.cocos.bridge" android:exported="false"/>',
+      '<activity android:name="com.truewatch.cocos.sample.HybridSampleNativeActivity" android:launchMode="singleTask" android:exported="true">',
+      '<intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>',
+      '</activity>',
+      '<!-- COCOS_HYBRID_NATIVE_PAGE_END -->',
+    ] : []),
     '  </application>',
     '</manifest>',
     '',
