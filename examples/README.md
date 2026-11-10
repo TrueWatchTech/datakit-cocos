@@ -99,7 +99,7 @@ See each project's README for specific steps; shared cases are maintained only h
 
 ### iOS NSURLConnection automatic collection
 
-The sample and bridge use TrueWatchSDK **1.6.8-alpha.5**. To exercise the legacy
+The sample and bridge use TrueWatchSDK **1.6.8**. To exercise the legacy
 network API, add `-SampleURLConnection YES` to the Xcode scheme's launch
 arguments, rebuild, and click **Native Auto Network**. This calls
 `sendNativeURLConnectionRequest()` and enables both

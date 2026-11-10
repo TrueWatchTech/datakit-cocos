@@ -99,7 +99,8 @@ describe('native build integration', () => {
 
     expect(installer).toContain('ft-sdk:1.7.6');
     expect(installer).toContain('ft-native:1.1.4');
-    expect(readFileSync('packages/cocos-session-replay/native-integration.json', 'utf8')).toContain('ft-session-replay:0.1.10-alpha01');
+    expect(JSON.parse(readFileSync('packages/cocos-session-replay/native-integration.json', 'utf8')).androidReplay)
+      .toBe('com.truewatch.ft.mobile.sdk.tracker.agent:ft-session-replay:0.1.10');
     expect(podspec).toContain("s.dependency 'TrueWatchSDK/Agent', '1.6.8'");
     expect(podspec).not.toContain("TrueWatchSDK/FTSessionReplay");
     expect(readFileSync('src/session-replay/native/ios/FTCocosReplayBridge.podspec', 'utf8')).toContain("s.dependency 'TrueWatchSDK/FTSessionReplay', '1.6.8'");
@@ -140,7 +141,7 @@ describe('native build integration', () => {
     const podfileText = readFileSync(podfile, 'utf8');
     expect(gradleText.match(/COCOS_SDK_BEGIN/g)).toHaveLength(1);
     expect(gradleText).toContain('https://mvnrepo.truewatch.com/repository/maven-releases');
-    expect(gradleText).toContain('ft-session-replay:0.1.10-alpha01');
+    expect(gradleText).toContain("ft-session-replay:0.1.10'");
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain("platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')");
     expect(gradlePropertiesText).toContain('PROP_COMPILE_SDK_VERSION=34');
@@ -179,7 +180,7 @@ describe('native build integration', () => {
     installNative(buildRoot, extension, { info() {}, warn() {} });
 
     const gradleText = readFileSync(gradle, 'utf8');
-    expect(gradleText).toContain('ft-session-replay:0.1.10-alpha01');
+    expect(gradleText).toContain("ft-session-replay:0.1.10'");
     expect(gradleText).toContain('com.google.code.gson:gson:2.10.1');
     expect(gradleText).toContain(join(
       buildRoot,

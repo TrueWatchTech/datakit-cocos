@@ -164,7 +164,7 @@ describe('core bridge API', () => {
     expect(attributes).toEqual({ feature: 'checkout' });
     transport.calls.forEach((call) => {
       expect((call.payload as { attributes: Record<string, string> }).attributes)
-        .toMatchObject({ sdk_bridge_info: '{"cocos":"0.1.1-alpha.5"}' });
+        .toMatchObject({ sdk_bridge_info: '{"cocos":"0.1.1"}' });
     });
     expect((transport.calls[0]?.payload as { attributes: Record<string, string> }).attributes)
       .toMatchObject({ feature: 'checkout' });
@@ -235,7 +235,7 @@ describe('native host hybrid lifecycle', () => {
         method: 'rum.startView',
         payload: {
           name: 'InitialCocosView',
-          attributes: { sdk_bridge_info: '{"cocos":"0.1.1-alpha.5"}' },
+          attributes: { sdk_bridge_info: '{"cocos":"0.1.1"}' },
         },
       },
     ]);
@@ -245,18 +245,18 @@ describe('native host hybrid lifecycle', () => {
     expect(transport.calls.slice(1)).toEqual([
       {
         method: 'rum.stopView',
-        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.1-alpha.5"}' } },
+        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.1"}' } },
       },
       {
         method: 'rum.startView',
         payload: {
           name: 'NextScene',
-          attributes: { sdk_bridge_info: '{"cocos":"0.1.1-alpha.5"}' },
+          attributes: { sdk_bridge_info: '{"cocos":"0.1.1"}' },
         },
       },
       {
         method: 'rum.stopView',
-        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.1-alpha.5"}' } },
+        payload: { attributes: { sdk_bridge_info: '{"cocos":"0.1.1"}' } },
       },
     ]);
   });
