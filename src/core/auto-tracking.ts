@@ -3,6 +3,9 @@ import type { FTAutoTrackingController, FTAutoTrackingScope } from './client.js'
 import type { FTAutoTrackingConfig, FTAttributes } from './types.js';
 import type { FTJsbErrorGlobal } from '../native/jsb-errors.js';
 import { FTObservationQueue, observationState } from './observation.js';
+import { isInternalConsoleLog } from './console-log.js';
+import { isInternalErrorText } from './internal-errors.js';
+import { viewErrorDeduplicator, type FTErrorReservation } from './error-deduplication.js';
 
 export interface FTEngineTrackingHooks {
   onSceneChanged(callback: (name: string) => void, includeCurrent?: boolean): () => void;
@@ -93,7 +96,15 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
   private installErrorTracking(): void {
     const nativeErrors = this.target.__FT_COCOS_JSB_ERRORS__;
     if (nativeErrors?.protocol === 2) {
-      this.stops.push(nativeErrors.subscribe((location, message, stack) => {
+      const deduplicator = viewErrorDeduplicator(nativeErrors);
+      const state = observationState(this.target);
+      const pending = new Set<FTErrorReservation>();
+      this.stops.push(() => {
+        pending.forEach(reservation => reservation.release());
+        pending.clear();
+      });
+      this.stops.push(nativeErrors.subscribe((location, message, stack, observation) => {
+        if (isInternalErrorText(message) || isInternalErrorText(stack)) return;
         // Creator 2 also reports promise bookkeeping notifications through onError.
         if (message === 'handlerAddedAfterPromiseRejected' || message === 'rejectAfterPromiseResolved'
           || message === 'resolveAfterPromiseResolved') return;
@@ -102,9 +113,29 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
         const errorMessage = reason || message || 'Uncaught JavaScript error';
         const errorStack = stack || location || '';
         const type = rejection ? 'unhandled_promise_rejection' : 'cocos_error';
-        this.observations.enqueue(() => {
-          this.rum.addError(errorMessage, errorStack, type);
+        const viewId = observation.context;
+        const reservation = typeof viewId === 'string' && viewId
+          ? deduplicator.reserve(viewId, type, errorMessage, errorStack) : undefined;
+        if (viewId && !reservation) return;
+        if (reservation) pending.add(reservation);
+        const accepted = this.observations.enqueue(() => {
+          try {
+            this.rum.addError(errorMessage, errorStack, type);
+            reservation?.commit();
+          } finally {
+            reservation?.release();
+            if (reservation) pending.delete(reservation);
+          }
         }, 2 * (location.length + message.length + stack.length));
+        if (!accepted && reservation) {
+          reservation.release();
+          pending.delete(reservation);
+        }
+      }, () => {
+        // Context lookup may itself log or trigger JSB callbacks in a host bridge.
+        state.reporting++;
+        try { return this.rum.observedViewId(); }
+        finally { state.reporting--; }
       }));
       return;
     }
@@ -114,6 +145,8 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
     if (!this.target.addEventListener || !this.target.removeEventListener) return;
     const errorListener = (event: Event): void => {
       const errorEvent = event as ErrorEvent;
+      if (isInternalErrorText(errorEvent.message) || isInternalErrorText(errorEvent.error?.message)
+        || isInternalErrorText(errorEvent.error?.stack)) return;
       this.rum.addError(
         errorEvent.message || 'Uncaught JavaScript error',
         errorEvent.error?.stack || `${errorEvent.filename || ''}:${errorEvent.lineno || 0}`,
@@ -121,6 +154,7 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
     };
     const rejectionListener = (event: Event): void => {
       const reason = (event as PromiseRejectionEvent).reason;
+      if (isInternalErrorText(reason) || isInternalErrorText(reason?.message) || isInternalErrorText(reason?.stack)) return;
       this.rum.addError(
         reason instanceof Error ? reason.message : String(reason),
         reason instanceof Error ? reason.stack || '' : '',
@@ -156,7 +190,9 @@ export class FTDefaultAutoTracking implements FTAutoTrackingController {
       consoleObject[method] = function (this: unknown, ...args: unknown[]): unknown {
         let snapshot: { timestampMs: number; values: unknown[] } | undefined;
         try {
-          if (active && !state.reporting) snapshot = { timestampMs: Date.now(), values: args.slice(0, 16) };
+          if (active && !state.reporting && !isInternalConsoleLog(args)) {
+            snapshot = { timestampMs: Date.now(), values: args.slice(0, 16) };
+          }
         } catch { /* Snapshot failures cannot prevent the original console call. */ }
         // Keep the original receiver, result and thrown value. No SDK work can
         // escape this finally block and replace the original console outcome.

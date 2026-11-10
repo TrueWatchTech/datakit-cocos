@@ -3,6 +3,7 @@ import { FTObservationQueue, observationState } from '../src/core/observation';
 import { installJsbErrorSource, type FTJsbErrorGlobal } from '../src/native/jsb-errors';
 import { FTDefaultAutoTracking } from '../src/core/auto-tracking';
 import { FTLogger, FTRUM, FTTrace } from '../src/core/modules';
+import { replayError } from '../src/session-replay/core/internal-errors';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -195,20 +196,102 @@ describe('console observation preserves the application call', () => {
     f.tracking.stop();
   });
 
+  it.each(['log', 'info', 'warn', 'error'] as const)('keeps SDK %s diagnostics in the console without enqueueing logs', method => {
+    vi.useFakeTimers();
+    const f = consoleFixture();
+    f.tracking.start({ console: true });
+    const errors = [
+      new Error('Missing Replay privacy skinned bounds'),
+      new Error('Missing Replay privacy perspective projection'),
+    ];
+    for (const error of errors) {
+      f.target.console[method]('[cocos-sdk] Session Replay frame dropped:', error);
+      expect(f.original).toHaveBeenLastCalledWith('[cocos-sdk] Session Replay frame dropped:', error);
+    }
+    f.target.console[method]('[cocos-sdk] Session Replay pointer dropped:', errors[0]);
+    f.target.console[method]('[cocos-sdk] Session Replay pointer segment dropped:', errors[1]);
+    expect(f.original).toHaveBeenCalledTimes(4);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.runAllTimers();
+    expect(f.invoke).not.toHaveBeenCalled();
+
+    // Error text alone and mentions of the SDK in business content are not internal diagnostics.
+    f.target.console[method]('business failure', errors[0]);
+    f.target.console[method]('business mentions [cocos-sdk]');
+    f.target.console[method]('[HybridTelemetrySample] Unable to enter Hybrid mode', errors[1]);
+    vi.runAllTimers();
+    expect(f.invoke).toHaveBeenCalledTimes(3);
+    expect(f.invoke).toHaveBeenCalledWith('logger.log', expect.objectContaining({
+      content: expect.stringContaining('business failure Missing Replay privacy skinned bounds'),
+      level: method === 'warn' ? 'warning' : method === 'error' ? 'error' : 'info',
+    }));
+    f.tracking.stop();
+  });
+
+  it('does not filter explicit logger calls with the internal console prefix', () => {
+    const invoke = vi.fn();
+    const logger = new FTLogger({ platform: 'android', invoke });
+    logger.log('[cocos-sdk] explicitly requested log', 'error');
+    expect(invoke).toHaveBeenCalledWith('logger.log', expect.objectContaining({
+      content: '[cocos-sdk] explicitly requested log', level: 'error',
+    }));
+  });
+
+  it('filters both RUM and the engine console echo of a tagged JSB error before the outer catch runs', () => {
+    vi.useFakeTimers();
+    const f = consoleFixture();
+    f.target.jsb!.onError!((_location, message, stack) => f.target.console.error('[ERROR]', message, stack));
+    f.tracking.start({ errors: true, console: true });
+    const error = replayError('Missing Replay privacy perspective projection');
+    f.fire('', 'unhandledRejectedPromise', `${error}\nstacktrace:\nframe`);
+    f.target.console.error(error);
+    f.target.console.error('[cocos-sdk] Session Replay frame dropped:', error);
+    vi.runAllTimers();
+    expect(f.original).toHaveBeenCalledTimes(3);
+    expect(f.invoke.mock.calls.filter(([method]) => method === 'rum.addError' || method === 'logger.log')).toEqual([]);
+    f.target.console.error(new Error('business failure'));
+    f.fire('', 'business failure', 'frame');
+    vi.runAllTimers();
+    expect(f.invoke.mock.calls.filter(([method]) => method === 'rum.addError')).toHaveLength(1);
+    expect(f.invoke.mock.calls.filter(([method]) => method === 'logger.log')).toHaveLength(2);
+    f.tracking.stop();
+  });
+
   it('forwards JSB callbacks triggered by SDK reporting without feeding error or log collection back into itself', () => {
     vi.useFakeTimers();
     const f = consoleFixture();
     f.target.jsb!.onError!((_l, m, s) => f.target.console.error(m, s));
     f.tracking.start({ console: true, errors: true });
-    f.invoke.mockImplementation(() => { f.fire('', 'SDK failure', ''); throw new Error('bridge failed'); });
+    f.invoke.mockImplementation((method: string) => {
+      if (method === 'rum.getViewId') return 'native-view';
+      f.fire('', 'SDK failure', ''); throw new Error('bridge failed');
+    });
     expect(() => f.fire('', 'application failure', 'raw stack')).not.toThrow();
     expect(f.original).toHaveBeenCalledExactlyOnceWith('application failure', 'raw stack');
-    expect(f.invoke).not.toHaveBeenCalled();
+    expect(f.invoke).toHaveBeenCalledExactlyOnceWith('rum.getViewId', undefined);
     expect(() => vi.runAllTimers()).not.toThrow();
-    expect(f.invoke).toHaveBeenCalledTimes(2);
+    expect(f.invoke).toHaveBeenCalledTimes(3);
     expect(f.original.mock.calls).toEqual([
       ['application failure', 'raw stack'], ['SDK failure', ''], ['SDK failure', ''],
     ]);
+    expect(vi.getTimerCount()).toBe(0);
+    f.tracking.stop();
+  });
+
+  it('isolates context lookup failures and their console/JSB callbacks from automatic collection', () => {
+    vi.useFakeTimers();
+    const f = consoleFixture();
+    f.target.jsb!.onError!((_l, m, s) => f.target.console.error(m, s));
+    f.tracking.start({ console: true, errors: true });
+    f.invoke.mockImplementation((method: string) => {
+      if (method !== 'rum.getViewId') return;
+      f.fire('', 'context lookup failed', '');
+      throw new Error('context unavailable');
+    });
+    f.fire('', 'application failure', 'stack');
+    vi.runAllTimers();
+    expect(f.invoke.mock.calls.map(call => call[0])).toEqual(['rum.getViewId', 'logger.log', 'rum.addError']);
+    expect(f.original.mock.calls).toEqual([['context lookup failed', ''], ['application failure', 'stack']]);
     expect(vi.getTimerCount()).toBe(0);
     f.tracking.stop();
   });

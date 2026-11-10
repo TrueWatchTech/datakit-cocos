@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = resolve(root, 'examples/acceptance-game');
 const files = ['Arena.ts', 'GameUI.ts', 'StarportGame.ts'];
 const sounds = ['hit', 'shoot', 'pickup', 'victory'];
-const components = ['ReplayInputCoverage.ts', 'ReplayBasicCoverage.ts', 'ReplayScrollCoverage.ts', 'ReplayLayoutCoverage.ts', 'ReplayEffectsCoverage.ts', 'ReplayMotionCoverage.ts', 'ReplayAssetCoverage.ts'];
+const components = ['SampleDashboard.ts', 'ReplayInputCoverage.ts', 'ReplayBasicCoverage.ts', 'ReplayScrollCoverage.ts', 'ReplayLayoutCoverage.ts', 'ReplayEffectsCoverage.ts', 'ReplayMotionCoverage.ts', 'ReplayAssetCoverage.ts'];
 const check = process.argv.includes('--check');
 // Stable per-project UUIDs keep editor references intact across repeated setup.
 function uuid(key) {

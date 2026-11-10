@@ -1,4 +1,5 @@
 import { FTLogger, FTMobileAgent, FTRUM, FTTrace } from '../core/modules.js';
+import { isInternalConsoleLog } from '../core/console-log.js';
 import type { FTEngineTrackingHooks } from '../core/auto-tracking.js';
 import type { FTNativeTransport } from '../core/transport.js';
 import type { FTAutoTrackingConfig, FTCocosConfig, FTCocosEnterOptions, FTValue } from '../core/types.js';
@@ -160,6 +161,7 @@ export class FTCocosWebSDK {
       const original = this.consoleObject[method];
       const wrapped = (...values: unknown[]): void => {
         original.apply(this.consoleObject, values);
+        if (isInternalConsoleLog(values)) return;
         this.logger.log(values.map(value => {
           if (typeof value === 'string') return value;
           try { return JSON.stringify(value); } catch { return String(value); }

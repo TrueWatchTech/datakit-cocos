@@ -7,6 +7,7 @@ import { isScenePublic } from '../src/web/privacy';
 import type { FTCocosWebConfig, FTWebWindow } from '../src/web/types';
 import type { FTEngineTrackingHooks } from '../src/core/auto-tracking';
 import { FT_COCOS_SDK_BRIDGE_INFO_KEY, FT_COCOS_SDK_VERSION } from '../src/core/version';
+import { replayError } from '../src/session-replay/core/internal-errors';
 
 function setup(configure: Partial<FTCocosWebConfig> = {}) {
   let rumConfig: Record<string, any> | undefined;
@@ -63,6 +64,33 @@ describe('Cocos Web facade', () => {
     bootstrapWeb(f.config, f.target);
     expect(f.rum.init).toHaveBeenCalledOnce(); expect(f.logs.init).toHaveBeenCalledOnce();
     expect(f.target.DATAFLUX_RUM_WEBGL!.webglReplayPlugin).toHaveBeenCalledOnce();
+  });
+
+  it('keeps internal SDK diagnostics on the console while collecting business and manual logs', () => {
+    const f = setup({ autoTrack: { console: true } });
+    const original = vi.fn();
+    const consoleObject = { log: original, info: original, warn: original, error: original } as unknown as Console;
+    const sdk = new FTCocosWebSDK(f.hooks, () => true, f.target, consoleObject);
+    sdk.start(f.config);
+    try {
+      const error = new Error('Missing Replay privacy perspective projection');
+      for (const method of ['log', 'info', 'warn', 'error'] as const) {
+        consoleObject[method]('[cocos-sdk] Session Replay frame dropped:', error);
+        expect(original).toHaveBeenLastCalledWith('[cocos-sdk] Session Replay frame dropped:', error);
+      }
+      expect(original).toHaveBeenCalledTimes(4);
+      expect(f.logs.logger.log).not.toHaveBeenCalled();
+      consoleObject.error('business mentions [cocos-sdk]');
+      consoleObject.warn('Missing Replay privacy skinned bounds');
+      sdk.logger.log('[cocos-sdk] explicitly requested log', 'error');
+      expect(f.logs.logger.log).toHaveBeenCalledTimes(3);
+      expect(f.logs.logger.log).toHaveBeenCalledWith('business mentions [cocos-sdk]', expect.any(Object), 'error');
+      expect(f.logs.logger.log).toHaveBeenCalledWith('Missing Replay privacy skinned bounds', expect.any(Object), 'warn');
+      expect(f.logs.logger.log).toHaveBeenCalledWith('[cocos-sdk] explicitly requested log', expect.any(Object), 'error');
+    } finally {
+      sdk.detach();
+    }
+    expect(consoleObject.error).toBe(original);
   });
 
   it('shares Replay controls and stop/restart state between common and explicit Web entrypoints', () => {
@@ -199,6 +227,18 @@ describe('Cocos Web facade', () => {
     expect(filter({ type: 'long_task' })).toBe(false);
     expect(filter({ type: 'error', context: { [FT_COCOS_SDK_BRIDGE_INFO_KEY]: 'bridge' } })).toBe(true);
     expect(filter({ type: 'view' })).toBe(true); f.sdk.detach();
+  });
+
+  it('filters tagged automatic Browser errors but preserves untagged and explicit manual errors', () => {
+    const f = setup(); f.sdk.start(f.config);
+    const filter = f.rumConfig().beforeSend;
+    const error = replayError('Missing Replay privacy skinned bounds');
+    expect(filter({ type: 'error', error: { message: error.message, stack: error.stack } })).toBe(false);
+    expect(filter({ type: 'error', error: { stack: error.stack } })).toBe(false);
+    expect(filter({ type: 'error', error: { message: 'Missing Replay privacy skinned bounds' } })).toBe(true);
+    expect(filter({ type: 'error', error: { message: error.message },
+      context: { [FT_COCOS_SDK_BRIDGE_INFO_KEY]: 'bridge' } })).toBe(true);
+    f.sdk.detach();
   });
 
   it('starts WebGL before engine boot and fails closed until privacy is registered', () => {

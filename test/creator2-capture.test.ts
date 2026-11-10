@@ -265,3 +265,57 @@ describe('Creator 2 replay capture', () => {
     expect(camera.clearFlags).toBe(0);
   });
 });
+
+describe('Creator 2.4.9 JSB perspective privacy', () => {
+  it('does not require projection data when there are no privacy regions', () => {
+    (globalThis as { cc?: unknown }).cc = {
+      director: { getScene: () => ({ getComponentsInChildren: () => [] }) }, EditBox: class {},
+    };
+    const capture = new FTCreator2CanvasCapture();
+    expect((capture as any).collectPrivacyRegions({ ortho: false }, 100, 100)).toEqual([]);
+  });
+
+  it('tags unavailable perspective projection at the throw site', () => {
+    (globalThis as { cc?: unknown }).cc = {
+      director: { getScene: () => ({ getComponentsInChildren: () => [] }) }, EditBox: class {},
+    };
+    const capture = new FTCreator2CanvasCapture();
+    capture.setPrivacy({}, 'mask');
+    expect(() => (capture as any).collectPrivacyRegions({ ortho: false }, 100, 100))
+      .toThrow('[ft-cocos-sdk-internal] Missing Replay privacy perspective projection');
+  });
+
+  it.each([false, true])('projects privacy and fails closed across a translated camera plane (rotated=%s)', rotated => {
+    const scene = { getComponentsInChildren: () => [] };
+    let depth = 0;
+    let crossing = false;
+    const node = {
+      parent: scene, children: [], getContentSize: () => ({ width: 2, height: 2 }),
+      getAnchorPoint: () => ({ x: 0, y: 0 }),
+      convertToWorldSpaceAR: (p: any) => rotated
+        ? { x: crossing ? 9 + p.x : depth, y: p.y, z: p.x }
+        : { x: p.x, y: p.y, z: crossing ? 9 + p.x : depth },
+    };
+    const camera = { ortho: false,
+      node: { getWorldRT: (out: any) => {
+        out.m = rotated ? [0,0,-1,0, 0,1,0,0, 1,0,0,0, 10,0,0,1]
+          : [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,10,1];
+      } },
+      _camera: { worldToScreen: (_out: any, point: any) => ({ x: rotated ? point.z : point.x, y: point.y, z: 0 }) },
+    };
+    (globalThis as { cc?: unknown }).cc = {
+      director: { getScene: () => scene }, EditBox: class {},
+      mat4: () => ({}), v3: (x: number, y: number, z: number) => ({ x, y, z }),
+    };
+    const capture = new FTCreator2CanvasCapture();capture.setPrivacy(node, 'mask');
+    const collect = () => (capture as any).collectPrivacyRegions(camera, 100, 100);
+    const regions = collect();
+    expect(regions).toHaveLength(1);
+    expect(regions[0].x).toBeCloseTo(0);
+    expect(regions[0]).toMatchObject({ y: 98, width: 2, height: 2, mode: 'mask' });
+    depth = 20;
+    expect(collect()).toEqual([]);
+    crossing = true;
+    expect(collect).toThrow('crosses the camera plane');
+  });
+});

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.1-alpha.5
+
+### Fixes
+
+- **Native Replay privacy bounds**: Correct Creator 2 perspective projection on JSB and animated skinned-mesh privacy bounds. Skip unnecessary projection checks when no protected nodes are present, while continuing to reject frames whose protected geometry cannot be resolved safely.
+- **Internal SDK diagnostics**: Exclude marked SDK and Replay failures and SDK diagnostic console messages from automatic error and log collection on native and Web platforms. Explicit manual reporting remains available.
+- **Native automatic error deduplication**: Deduplicate identical error types, messages, and stacks within the same native View, including queued reports and multiple JSB subscribers. Keep errors in different Views independent and release reservations when reports cannot be delivered.
+
+### Improvements
+
+- **Hybrid samples**: Simplify dashboard navigation, improve Creator 2/3 rendering and 3D validation scenes, and standardize sample UI text and documentation in English.
+
+### Migration
+
+- Upgrade `@truewatchtech/cocos-sdk` and optional `@truewatchtech/cocos-session-replay` together to `0.1.1-alpha.5`. Rerun the SDK installer with `--replay` or `--no-replay`, regenerate the native project, and rebuild to install the updated runtime and native bridges.
+- Native SDK dependencies remain Android Agent `1.7.6`, Android Session Replay `0.1.10-alpha01`, and iOS Agent / Session Replay `1.6.8`.
+
 ## 0.1.1-alpha.4
 
 ### Fixes

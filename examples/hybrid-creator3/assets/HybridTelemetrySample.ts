@@ -1,3 +1,4 @@
+import { SampleDashboard, dashboardViewport, statusPages, DashboardAction, DashboardViewport } from './acceptance-components/SampleDashboard';
 import { WebViewValidationScene } from './WebViewValidationScene';
 import { ReplayEvidenceScene } from './ReplayEvidenceScene';
 import { ReplayPostProcessScene } from './ReplayPostProcessScene';
@@ -19,6 +20,7 @@ import { Replay3DScene } from './Replay3DScene';
 import {
   _decorator,
   Button,
+  BlockInputEvents,
   Camera,
   Director,
   Canvas,
@@ -33,6 +35,7 @@ import {
   UITransform,
   director,
   native,
+  profiler,
   sys,
   view,
 } from 'cc';
@@ -89,6 +92,12 @@ interface UntrackedXhrMethods {
 }
 
 class HybridTelemetryRuntime {
+  private dashboard = new SampleDashboard(3);
+  private dashboardSize: DashboardViewport = { width: 960, height: 640, compact: false };
+  private privacyPage = false;
+  private lastStatus = 'Ready to test';
+  private lastStatusColor = COLORS.muted;
+  private detailsNode?: Node;
   private inputCoverageNode?: Node;
   private sampleRoot?: Node;
   private gameNode?: Node;
@@ -98,7 +107,7 @@ class HybridTelemetryRuntime {
   private privacyProbeGroup?: Node;
   private privacyLayoutMoved = false;
   private replayState = 0;
-  private maskShowAll = false;
+  private maskShowAll = true;
   private resourceSequence = 0;
   private entered = false;
   private waitingForNativeReturn = false;
@@ -111,11 +120,13 @@ class HybridTelemetryRuntime {
 
   start(): void {
     const { root, camera } = this.createScene();
+    profiler?.hideStats();
     this.sampleCamera = camera;
     this.sampleCanvas = root.parent!;
     truewatchSdk?.setReplayCamera(camera);
     this.sampleRoot = root;
     this.render(root);
+    view.on('canvas-resize', this.refreshDashboardSize, this);
 
     if (!sys.isNative) {
       this.setStatus('Editor preview only. Build Android or iOS to call the native bridge.', COLORS.warning);
@@ -304,7 +315,7 @@ class HybridTelemetryRuntime {
     const group = this.privacyProbeGroup;
     if (!group) return;
     const scale = this.privacyLayoutMoved ? 0.85 : 1;
-    group.setPosition(this.privacyLayoutMoved ? 36 : 0, this.privacyLayoutMoved ? 112 : 125);
+    group.setPosition(this.privacyLayoutMoved ? 36 : 0, this.privacyLayoutMoved ? 82 : 95);
     group.setScale(scale, scale, 1);
     this.setStatus('Privacy layout changed: only the three red targets should be masked in Replay', COLORS.primary);
   }
@@ -392,13 +403,77 @@ class HybridTelemetryRuntime {
     return { root, camera };
   }
 
-  private render(root: Node): void {
-    this.panelRedraws = [];
-    this.panel(root, 'Background', 0, 0, 960, 640, COLORS.background);
-    this.label(root, 'Cocos Hybrid · Creator 3', 0, 258, 860, 48, 34, COLORS.text);
-    this.label(root, 'Native host owns SDK modules; Cocos attaches RUM automation and canvas Replay.', 0, 218, 860, 30, 17, COLORS.muted);
+  private setSampleViewport(width: number, height: number, showAll = true): void {
+    if (!this.sampleRoot) return;
+    this.sampleRoot.getComponent(UITransform)!.setContentSize(width, height);
+    this.sampleRoot.parent!.getComponent(UITransform)!.setContentSize(width, height);
+    if (this.sampleCamera) this.sampleCamera.orthoHeight = height / 2;
+    view.setDesignResolutionSize(width, height, !showAll ? ResolutionPolicy.FIXED_HEIGHT : ResolutionPolicy.SHOW_ALL);
+  }
 
-    const replayNode = this.panel(root, 'ReplayVisualState', 0, 125, 720, 140, COLORS.panel);
+  private refreshDashboardSize(): void {
+    if (!this.sampleRoot?.activeInHierarchy || this.privacyPage || !this.sampleCanvas?.activeInHierarchy) return;
+    const frame = view.getFrameSize();
+    const next = dashboardViewport(frame.width, frame.height);
+    if (next.width !== this.dashboardSize.width || next.height !== this.dashboardSize.height) this.render(this.sampleRoot);
+  }
+
+  private render(root: Node): void {
+    if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
+    root.children.slice().forEach(child => { child.active = false; child.destroy(); });
+    this.detailsNode = undefined;
+    this.privacyMaskProbe = undefined;
+    this.privacyProbeGroup = undefined;
+    this.replayCard = undefined;
+    this.panelRedraws = [];
+    const frame = view.getFrameSize();
+    this.dashboardSize = this.privacyPage ? { width: 960, height: 640, compact: false } : dashboardViewport(frame.width, frame.height);
+    const { width, height } = this.dashboardSize;
+    this.setSampleViewport(width, height, !this.privacyPage || this.maskShowAll);
+    this.panel(root, 'Background', 0, 0, width, height, COLORS.background);
+    this.label(root, 'Cocos Sample', -width / 2 + 136, height / 2 - 44, 224, 48, width < 640 ? 26 : 30, COLORS.text);
+    if (width > 640) this.label(root, 'Creator 3', 16, height / 2 - 44, 170, 36, 20, COLORS.primary);
+    this.button(root, 'NativePage', 'Native page', width / 2 - 112, height / 2 - 44, 176, 56, () => this.openNativePage(), COLORS.info);
+
+    if (this.privacyPage) {
+      this.renderPrivacy(root);
+    } else {
+      this.dashboard.render({
+        label: (text, x, y, w, h, size, tone) => { this.label(root, text, x, y, w, h, size, COLORS[tone]); },
+        button: (name, text, x, y, w, h, click, tone) => this.button(root, name, text, x, y, w, h, click, COLORS[tone]),
+        card: (entry, x, y, w, h, click) => {
+          const card = this.panel(root, entry.id, x, y, w, h, COLORS.panel);
+          card.addComponent(Button).transition = Button.Transition.NONE;
+          card.on('click', click);
+          this.label(card, entry.title, 0, 19, w - 32, 40, 26, COLORS.text);
+          this.label(card, entry.description, 0, -27, w - 32, 36, 17, COLORS.muted);
+        },
+      }, this.dashboardSize, () => this.render(root), action => this.runDashboardAction(action));
+    }
+    this.panel(root, 'StatusPanel', 0, -height / 2 + 46, width - 32, 68, COLORS.panel);
+    this.status = this.label(root, '', -90, -height / 2 + 46, width - 240, 52, 18, this.lastStatusColor);
+    this.button(root, 'StatusDetails', 'Details', width / 2 - 112, -height / 2 + 46, 176, 56, () => this.showStatusDetails(), COLORS.panel);
+    this.setStatus(this.lastStatus, this.lastStatusColor);
+    // Old page Graphics are destroyed at the end of the frame; refresh the new
+    // page afterwards so native shared-buffer reuse cannot erase its cards.
+    director.once(Director.EVENT_AFTER_DRAW, () => this.panelRedraws.forEach(redraw => redraw()));
+  }
+
+  private openPrivacy(): void {
+    if (!this.sampleRoot) return;
+    this.privacyPage = true;
+    this.privacyLayoutMoved = false;
+    this.replayState = 0;
+    this.render(this.sampleRoot);
+  }
+
+  private renderPrivacy(root: Node): void {
+    this.button(root, 'BackToCategories', '‹ Categories', -350, 208, 212, 56, () => {
+      this.privacyPage = false;
+      this.render(root);
+    }, COLORS.panel);
+    this.label(root, 'Replay & privacy', 100, 208, 420, 40, 26, COLORS.text);
+    const replayNode = this.panel(root, 'ReplayVisualState', 0, 95, 720, 140, COLORS.panel);
     this.privacyProbeGroup = replayNode;
     this.replayCard = replayNode.getComponent(Graphics) || undefined;
     this.label(replayNode, 'COMPONENT MASK', -230, 49, 200, 22, 15, COLORS.text);
@@ -426,52 +501,91 @@ class HybridTelemetryRuntime {
     this.label(replayNode, 'KEEP\nME', 115, 0, 38, 44, 12, COLORS.text);
     this.label(replayNode, 'PUBLIC: all green edges and KEEP ME labels must stay visible', 0, -52, 690, 22, 15, COLORS.primary);
 
-    this.button(root, 'AutoNetwork', 'Auto Network', -270, 28, 220, 56, () => this.emitAutomaticResource(), COLORS.info);
-    this.button(root, 'ManualNetwork', 'Manual Trace', 0, 28, 220, 56, () => this.emitManualTraceResource(), COLORS.primary);
-    this.button(root, 'RumLog', 'RUM + Log', 270, 28, 220, 56, () => this.emitRumAndLog(), COLORS.primary);
-    this.button(root, 'RumError', 'RUM Error', -270, -48, 220, 56, () => this.emitError(), COLORS.danger);
-    this.button(root, 'ReplayChange', 'Replay change', 0, -48, 220, 56, () => this.changeReplayState(), COLORS.warning);
-    this.button(root, 'NativePage', 'Native page', 270, -48, 220, 56, () => this.openNativePage(), COLORS.info);
-    this.button(root, 'MaskFit', 'Mask: toggle fit', -180, -108, 300, 40, () => this.toggleMaskFit(), COLORS.primary);
 
-    this.button(root, 'PrivacyLayout', 'Mask: move + scale', 180, -108, 300, 40, () => this.togglePrivacyLayout(), COLORS.primary);
+    this.button(root, 'ReplayChange', 'Replay change', -210, -36, 360, 64, () => this.changeReplayState(), COLORS.primary);
+    this.button(root, 'MaskFit', 'Toggle fit', 210, -36, 360, 64, () => this.toggleMaskFit(), COLORS.info);
+    this.button(root, 'PrivacyLayout', 'Move + scale', -210, -118, 360, 64, () => this.togglePrivacyLayout(), COLORS.primary);
+    this.label(root, 'Mask or hide the three private targets. Keep the green guards and KEEP ME visible.', 0, -202, 880, 44, 18, COLORS.muted);
+  }
 
-    const statusPanel = this.panel(root, 'StatusPanel', 0, -180, 780, 84, COLORS.panel);
-    this.status = this.label(statusPanel, 'Preparing Hybrid integration…', 0, 0, 730, 50, 18, COLORS.muted);
-    this.button(root, 'InputCoverage', 'Inputs', -400, -300, 150, 32, () => this.openCoverage('input'), COLORS.info);
-    this.button(root, 'BasicCoverage', 'Basic', -240, -300, 150, 32, () => this.openCoverage('basic'), COLORS.info);
-    this.button(root, 'ScrollCoverage', 'Scroll', -80, -300, 150, 32, () => this.openCoverage('scroll'), COLORS.info);
-    this.button(root, 'LayoutCoverage', 'Layout', 80, -300, 150, 32, () => this.openCoverage('layout'), COLORS.info);
-    this.button(root, 'WebViewValidation', 'WebView', 370, 258, 170, 36, () => this.openCoverage('webview'), COLORS.info);
-    this.button(root, 'EffectsCoverage', 'Effects', 240, -300, 150, 32, () => this.openCoverage('effects'), COLORS.info);
-    this.button(root, 'MotionCoverage', 'Motion', 400, -300, 150, 32, () => this.openCoverage('motion'), COLORS.info);
-    this.button(root, 'RenderCoverage', 'UI render', -384, -143, 175, 24, () => this.openCoverage('render'), COLORS.info);
-    this.button(root, 'SupportCoverage', 'Support', -192, -143, 175, 24, () => this.openCoverage('support'), COLORS.info);
-    this.button(root, 'GeometryCoverage', 'Geometry', 0, -143, 175, 24, () => this.openCoverage('geometry'), COLORS.info);
-    this.button(root, 'RigCoverage', 'Skinning + terrain', 192, -143, 175, 24, () => this.openCoverage('rig'), COLORS.info);
-    this.button(root, 'EvidenceCoverage', 'Screenshot evidence', 350, -180, 230, 26, () => this.openCoverage('evidence'), COLORS.info);
-    this.button(root, 'OptionalCoverage', 'Optional modules', 384, -143, 175, 24, () => this.openCoverage('optional'), COLORS.info);
-    this.button(root, 'AssetCoverage', 'Tile + skeleton assets', -300, -222, 280, 30, () => this.openCoverage('assets'), COLORS.info);
-    this.button(root, 'LightCoverage', '3D mesh + four lights', 0, -222, 280, 30, () => this.open3DScene(true), COLORS.info);
-    this.button(root, 'PostProcessCoverage', 'Post effects', 300, -222, 280, 30, () => this.openPostProcessScene(), COLORS.info);
-    this.button(root, 'StarportGame', 'Open Starport Game', -200, -258, 360, 40, () => this.openGame(), COLORS.primary);
-    this.button(root, 'Replay3D', 'Extra: 3D Replay scene', 200, -258, 360, 40, () => this.open3DScene(), COLORS.info);
+  private runDashboardAction(action: DashboardAction): void {
+    switch (action) {
+      case 'AutoNetwork': this.emitAutomaticResource(); break;
+      case 'ManualNetwork': this.emitManualTraceResource(); break;
+      case 'RumLog': this.emitRumAndLog(); break;
+      case 'RumError': this.emitError(); break;
+      case 'Privacy': this.openPrivacy(); break;
+      case 'ReplayChange': this.openPrivacy(); this.changeReplayState(); break;
+      case 'StarportGame': this.openGame(); break;
+      case 'InputCoverage': void this.openCoverage('input'); break;
+      case 'BasicCoverage': void this.openCoverage('basic'); break;
+      case 'ScrollCoverage': void this.openCoverage('scroll'); break;
+      case 'LayoutCoverage': void this.openCoverage('layout'); break;
+      case 'WebViewValidation': void this.openCoverage('webview'); break;
+      case 'EffectsCoverage': void this.openCoverage('effects'); break;
+      case 'MotionCoverage': void this.openCoverage('motion'); break;
+      case 'AssetCoverage': void this.openCoverage('assets'); break;
+      case 'EvidenceCoverage': void this.openCoverage('evidence'); break;
+      case 'RenderCoverage': void this.openCoverage('render'); break;
+      case 'SupportCoverage': void this.openCoverage('support'); break;
+      case 'GeometryCoverage': void this.openCoverage('geometry'); break;
+      case 'RigCoverage': void this.openCoverage('rig'); break;
+      case 'OptionalCoverage': void this.openCoverage('optional'); break;
+      case 'Replay3D': void this.open3DScene(); break;
+      case 'LightCoverage': void this.open3DScene(true); break;
+      case 'PostProcessCoverage': void this.openPostProcessScene(); break;
+    }
+  }
+
+  private showStatusDetails(): void {
+    if (!this.sampleRoot || this.detailsNode) return;
+    const { width, height } = this.dashboardSize;
+    const redrawCount = this.panelRedraws.length;
+    const overlay = this.panel(this.sampleRoot, 'StatusDetailOverlay', 0, 0, width, height, COLORS.background);
+    this.detailsNode = overlay;
+    overlay.addComponent(BlockInputEvents);
+    this.label(overlay, 'Latest result', 0, height / 2 - 52, width - 48, 48, 28, COLORS.text);
+    // Paginate long errors without shrinking the text or clipping their tail.
+    const chunks = statusPages(this.lastStatus, width, height);
+    let page = 0;
+    const body = this.label(overlay, chunks[0], 0, 24, width - 96, height - 324, 22, this.lastStatusColor);
+    const count = this.label(overlay, `1 / ${chunks.length}`, 0, height / 2 - 104, 220, 36, 20, COLORS.muted);
+    const turn = (delta: number): void => {
+      page = Math.max(0, Math.min(chunks.length - 1, page + delta));
+      body.string = chunks[page];
+      count.string = `${page + 1} / ${chunks.length}`;
+    };
+    if (chunks.length > 1) {
+      this.button(overlay, 'PreviousDetail', 'Previous', -112, -height / 2 + 146, 160, 56, () => turn(-1), COLORS.panel);
+      this.button(overlay, 'NextDetail', 'Next', 112, -height / 2 + 146, 160, 56, () => turn(1), COLORS.panel);
+    }
+    this.button(overlay, 'CloseDetails', 'Close details', 0, -height / 2 + 62, 240, 64, () => {
+      overlay.active = false;
+      overlay.destroy();
+      this.panelRedraws.splice(redrawCount);
+      this.detailsNode = undefined;
+      // Destroying native Graphics can invalidate shared buffers of the page
+      // underneath. Re-upload after the overlay's deferred destruction.
+      director.once(Director.EVENT_AFTER_DRAW, () => this.panelRedraws.forEach(redraw => redraw()));
+    }, COLORS.info);
   }
 
   private async openPostProcessScene():Promise<void> {
     if(this.postProcessScene||!this.sampleCamera||!this.sampleCanvas)return;
+    this.setSampleViewport(960, 640);
     // Select an explicit disabled source to suspend GPU captures during the
     // device-only control. The visible scene and Hybrid ownership stay active.
     const probeNode=new Node('PostCaptureDisabledSource');director.getScene()!.addChild(probeNode);const disabledSource=probeNode.addComponent(Camera);disabledSource.enabled=false;truewatchSdk?.setReplayCamera(disabledSource);
     this.sampleCamera.enabled=false;this.sampleCanvas.active=false;
     if(this.privacyMaskProbe)truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe,'unmask');
     const node=new Node('ReplayPostProcessValidation');director.getScene()!.addChild(node);this.postProcessScene=node.addComponent(ReplayPostProcessScene);
-    const restore=()=>{truewatchSdk?.setReplayCamera(this.sampleCamera);this.sampleCamera!.enabled=true;this.sampleCanvas!.active=true;director.once(Director.EVENT_AFTER_DRAW,()=>this.panelRedraws.forEach(redraw=>redraw()));if(this.privacyMaskProbe)truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe,'mask');node.active=false;node.destroy();probeNode.destroy();this.postProcessScene=undefined;};
+    const restore=()=>{truewatchSdk?.setReplayCamera(this.sampleCamera);this.sampleCamera!.enabled=true;this.sampleCanvas!.active=true;this.render(this.sampleRoot!);director.once(Director.EVENT_AFTER_DRAW,()=>this.panelRedraws.forEach(redraw=>redraw()));if(this.privacyMaskProbe)truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe,'mask');node.active=false;node.destroy();probeNode.destroy();this.postProcessScene=undefined;};
     try{await this.postProcessScene.initialize(restore,(component,stage)=>{if(this.entered)truewatchSdk.rum.addAction('replay_postprocess_case','custom',{...ATTRIBUTES,component,stage});},enabled=>truewatchSdk?.setReplayCamera(enabled?this.postProcessScene!.camera:disabledSource));}catch(error){restore();this.setStatus(`Unable to open post effects: ${String(error)}`,COLORS.danger);}
   }
 
   private async open3DScene(lightCoverage = false): Promise<void> {
     if (this.replay3D || !this.sampleCamera || !this.sampleCanvas) return;
+    this.setSampleViewport(960, 640);
     this.sampleCamera.enabled = false;
     this.sampleCanvas.active = false;
     if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
@@ -482,6 +596,7 @@ class HybridTelemetryRuntime {
       truewatchSdk?.setReplayCamera(this.sampleCamera);
       this.sampleCamera!.enabled = true;
       this.sampleCanvas!.active = true;
+      this.render(this.sampleRoot!);
       if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'mask');
       node.active = false;
       node.destroy();
@@ -503,7 +618,7 @@ class HybridTelemetryRuntime {
   private async openCoverage(kind: 'webview' | 'input' | 'basic' | 'scroll' | 'layout' | 'effects' | 'motion' | 'assets' | 'render' | 'support' | 'geometry' | 'rig' | 'optional' | 'evidence'): Promise<void> {
     if (this.inputCoverageNode || !this.sampleRoot) return;
     const sampleRoot = this.sampleRoot;
-    view.setDesignResolutionSize(960, 640, ResolutionPolicy.SHOW_ALL);
+    this.setSampleViewport(960, 640);
     sampleRoot.active = false;
     if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
     const node = new Node('ReplayCoverage');
@@ -515,13 +630,11 @@ class HybridTelemetryRuntime {
       this.inputCoverageNode = undefined;
       node.active = false;
       node.destroy();
-      sampleRoot.children.slice().forEach(child => { child.active = false; child.destroy(); });
       this.privacyLayoutMoved = false;
       this.replayState = 0;
       sampleRoot.active = true;
       this.render(sampleRoot);
       this.setStatus('Coverage closed · reopen to verify fresh state', COLORS.primary);
-      view.setDesignResolutionSize(960, 640, this.maskShowAll ? ResolutionPolicy.SHOW_ALL : ResolutionPolicy.FIXED_HEIGHT);
       truewatchSdk?.setReplayCamera(this.sampleCamera);
       if (this.entered) { truewatchSdk.rum.stopView(); truewatchSdk.rum.startView(VIEW_NAME, ATTRIBUTES); }
     };
@@ -540,7 +653,7 @@ class HybridTelemetryRuntime {
     if (this.gameNode || !this.sampleRoot) return;
     const sampleRoot = this.sampleRoot;
     // The shared game uses the same screen camera, so HUD and gameplay are captured together.
-    view.setDesignResolutionSize(960, 640, ResolutionPolicy.SHOW_ALL);
+    this.setSampleViewport(960, 640);
     sampleRoot.active = false;
     if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'unmask');
     const node = new Node('StarportGame');
@@ -554,13 +667,11 @@ class HybridTelemetryRuntime {
       node.destroy();
       // Rebuild procedural Graphics after returning; native 3.x can lose their
       // uploaded geometry when the old UI subtree is disabled and re-enabled.
-      sampleRoot.children.slice().forEach(child => { child.active = false; child.destroy(); });
       this.privacyLayoutMoved = false;
       this.replayState = 0;
       sampleRoot.active = true;
       this.render(sampleRoot);
       this.setStatus(this.entered ? 'Cocos page active · automatic and manual network samples ready' : 'Editor preview only. Build Android or iOS to call the native bridge.', this.entered ? COLORS.primary : COLORS.warning);
-      view.setDesignResolutionSize(960, 640, this.maskShowAll ? ResolutionPolicy.SHOW_ALL : ResolutionPolicy.FIXED_HEIGHT);
       truewatchSdk?.setReplayCamera(this.sampleCamera);
       if (this.privacyMaskProbe) truewatchSdk?.replay.setPrivacy(this.privacyMaskProbe, 'mask');
       if (this.entered) { truewatchSdk.rum.stopView(); truewatchSdk.rum.startView(VIEW_NAME, ATTRIBUTES); }
@@ -594,7 +705,6 @@ class HybridTelemetryRuntime {
     const redraw=()=>{
       if (!graphics.isValid || !graphics.node.activeInHierarchy) return;
       graphics.clear();
-      graphics.fillColor = color;
       if (square) graphics.rect(-width / 2, -height / 2, width, height);
       else graphics.roundRect(-width / 2, -height / 2, width, height, Math.min(18, height / 4));
       graphics.fill();
@@ -606,9 +716,9 @@ class HybridTelemetryRuntime {
 
   private button(parent: Node, name: string, text: string, x: number, y: number, width: number, height: number, onClick: () => void, color: Color): void {
     const node = this.panel(parent, name, x, y, width, height, color);
-    node.addComponent(Button);
+    node.addComponent(Button).transition = Button.Transition.NONE;
     node.on(Button.EventType.CLICK, onClick);
-    this.label(node, text, 0, 0, width - 16, height - 8, 18, COLORS.text);
+    this.label(node, text, 0, 0, width - 24, height - 8, 20, color === COLORS.primary ? COLORS.background : COLORS.text);
   }
 
   private label(parent: Node, text: string, x: number, y: number, width: number, height: number, fontSize: number, color: Color): Label {
@@ -624,13 +734,17 @@ class HybridTelemetryRuntime {
     label.color = color;
     label.horizontalAlign = Label.HorizontalAlign.CENTER;
     label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.overflow = Label.Overflow.SHRINK;
+    label.overflow = Label.Overflow.CLAMP;
     return label;
   }
 
   private setStatus(text: string, color: Color): void {
+    this.lastStatus = text;
+    this.lastStatusColor = color;
     if (!this.status?.node.isValid) return;
-    this.status.string = text;
+    const summary = text.replace(/\s+/g, ' ');
+    const limit = Math.min(66, Math.floor((this.dashboardSize.width - 240) / 18) * 2 - 4);
+    this.status.string = summary.length > limit ? summary.slice(0, limit - 1) + '…' : summary;
     this.status.color = color;
   }
 }

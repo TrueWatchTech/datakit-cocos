@@ -1,3 +1,4 @@
+import { replayError } from '../core/internal-errors.js';
 import { makeRgbaOpaque } from '../core/replay-pixels.js';
 
 const GL_DEPTH24_STENCIL8 = 0x88f0;
@@ -22,13 +23,13 @@ export function createReplayTarget(width: number, height: number, previousTextur
     const gfx = cc.gfx;
     const gl = cc.game?._renderContext;
     if (!device?.setFrameBuffer || !gfx?.RenderBuffer || !gfx?.FrameBuffer || !gl) {
-      throw new Error('Creator 2 native Replay requires the native gfx framebuffer API');
+      throw replayError('Creator 2 native Replay requires the native gfx framebuffer API');
     }
     const version = String(gl.getParameter(gl.VERSION));
     if (!/OpenGL ES\s+[3-9]\./.test(version)
       && !gl.getExtension('OES_packed_depth_stencil')
       && !gl.getExtension('GL_OES_packed_depth_stencil')) {
-      throw new Error('Creator 2 native Replay requires packed depth/stencil support');
+      throw replayError('Creator 2 native Replay requires packed depth/stencil support');
     }
     const bind = (framebuffer: any) => {
       // JSB queues WebGL commands, whereas native gfx executes immediately.
@@ -53,7 +54,7 @@ export function createReplayTarget(width: number, height: number, previousTextur
 
     const checkComplete = () => {
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        throw new Error('Creator 2 Replay framebuffer is incomplete');
+        throw replayError('Creator 2 Replay framebuffer is incomplete');
       }
     };
     try {

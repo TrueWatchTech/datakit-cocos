@@ -10,6 +10,14 @@
 #import "FTResourceContentModel.h"
 #import <UIKit/UIKit.h>
 
+// Optional context access in the pinned Agent. Guard every selector so older
+// hosts can keep reporting errors when this internal surface is unavailable.
+@protocol FTCocosErrorViewContext <NSObject>
+- (id)delegate;
+- (void)syncProcess;
+- (NSDictionary *)getCurrentSessionInfo;
+@end
+
 @implementation FTCocosBridge
 
 + (NSString *)invoke:(NSString *)method payload:(NSString *)payload {
@@ -107,6 +115,16 @@
     if ([method isEqualToString:@"rum.startView"]) {
         [rum startViewWithName:[self requiredText:arguments key:@"name"] property:[self dictionary:arguments[@"attributes"]]];
         return nil;
+    }
+    if ([method isEqualToString:@"rum.getViewId"]) {
+        id<FTCocosErrorViewContext> source = (id)rum;
+        if (![source respondsToSelector:@selector(delegate)]) return nil;
+        id<FTCocosErrorViewContext> context = [source delegate];
+        if (![context respondsToSelector:@selector(syncProcess)] ||
+            ![context respondsToSelector:@selector(getCurrentSessionInfo)]) return nil;
+        [context syncProcess];
+        NSDictionary *info = [context getCurrentSessionInfo];
+        return [info isKindOfClass:NSDictionary.class] ? [self text:info[@"view_id"]] : nil;
     }
     if ([method isEqualToString:@"rum.stopView"]) {
         [rum stopViewWithProperty:[self dictionary:arguments[@"attributes"]]];

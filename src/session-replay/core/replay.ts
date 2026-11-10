@@ -1,3 +1,4 @@
+import { replayError } from './internal-errors.js';
 import {
   encodeReplayImageRecord,
   encodeReplayPointerRecords,
@@ -446,7 +447,7 @@ export class FTSessionReplay {
             if (isRejectedSaveImageV2(value)) return undefined;
             const result = normalizeSaveImageV2Result(value);
             if (result.byteSize > maxFrameBytes) {
-              throw new RangeError('Native replay image exceeded imagePolicy.maxFrameBytes');
+              throw replayError('Native replay image exceeded imagePolicy.maxFrameBytes', RangeError);
             }
             return { ...result, byteSizeSource: 'native' };
           }
@@ -458,7 +459,7 @@ export class FTSessionReplay {
       }
       // V1 cannot enforce encoded size. Never silently discard a caller's
       // explicit image policy by falling back to unbounded image storage.
-      throw new Error('Replay imagePolicy requires replay.saveImageV2. Upgrade the native Replay SDK and rebuild the native project.');
+      throw replayError('Replay imagePolicy requires replay.saveImageV2. Upgrade the native Replay SDK and rebuild the native project.');
     }
 
     const resourceId = await this.invokeSaveImage('replay.saveImage', {
@@ -567,7 +568,7 @@ function stringValue(...values: unknown[]): string | undefined {
 }
 
 export function normalizeSaveImageV2Result(value: unknown): FTReplaySaveImageV2Result {
-  if (!value || typeof value !== 'object') throw new TypeError('Invalid replay.saveImageV2 result');
+  if (!value || typeof value !== 'object') throw replayError('Invalid replay.saveImageV2 result', TypeError);
   const result = value as Record<string, unknown>;
   const resourceId = stringValue(result.resourceId, result.resource_id);
   const byteSize = numberValue(result.byteSize, result.byte_size);
@@ -575,10 +576,10 @@ export function normalizeSaveImageV2Result(value: unknown): FTReplaySaveImageV2R
   const height = numberValue(result.height);
   const mimeType = stringValue(result.mimeType, result.mime_type);
   if (!resourceId || !isPositiveInteger(byteSize) || !isPositiveInteger(width) || !isPositiveInteger(height)) {
-    throw new TypeError('Invalid replay.saveImageV2 result');
+    throw replayError('Invalid replay.saveImageV2 result', TypeError);
   }
   if (mimeType && !mimeType.startsWith('image/')) {
-    throw new TypeError('Invalid replay.saveImageV2 mimeType');
+    throw replayError('Invalid replay.saveImageV2 mimeType', TypeError);
   }
   return {
     resourceId,
@@ -613,7 +614,7 @@ export function sampleReplayFrame(
 ): FTReplayFrameSample {
   const pixelCount = width * height;
   if (width < 1 || height < 1 || rgba.length < pixelCount * 4) {
-    throw new RangeError('Replay frame RGBA data does not match its dimensions');
+    throw replayError('Replay frame RGBA data does not match its dimensions', RangeError);
   }
   const sampleCount = Math.min(maximumSamples, pixelCount);
   const luminance = new Uint8Array(sampleCount);

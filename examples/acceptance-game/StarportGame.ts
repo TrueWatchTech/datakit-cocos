@@ -1,6 +1,6 @@
 import { Arena, obstacles, ArenaEvent, Point } from './Arena';
 import { GameUI, GameNode, GameColor, GameGraphics, GameLabel, GameCallbacks } from './GameUI';
-const stages = ['边境停机坪', '冷却反应堆', '深空核心'];
+const stages = ['Frontier Hangar', 'Cooling Reactor', 'Deep Space Core'];
 /** One game and acceptance flow shared by both Creator generations. */
 export class StarportGame {
     private root!: GameNode;
@@ -129,9 +129,9 @@ export class StarportGame {
         }
         this.label(this.root, 'NORTHSTAR  /  TRAINING DIVISION', -233, 236, 430, 24, 12, this.palette.muted);
         this.label(this.root, '◈  ' + this.profile.coins, 245, 235, 150, 32, 20, this.palette.gold);
-        this.button(this.root, 'Settings', '设置', 386, 235, 96, 32, () => this.go('Settings'), this.palette.panel, this.palette.white);
-        this.label(this.root, '星港突围', -300, 186, 310, 59, 38, this.palette.white);
-        this.label(this.root, 'STARPORT  /  ' + (this.page === 'Lobby' ? '机库大厅' : this.page === 'StageSelect' ? '行动部署' : this.page === 'Results' ? '战后报告' : '控制中心'), 140, 183, 520, 25, 13, this.palette.muted);
+        this.button(this.root, 'Settings', 'Settings', 386, 235, 96, 32, () => this.go('Settings'), this.palette.panel, this.palette.white);
+        this.label(this.root, 'Starport Assault', -300, 186, 310, 59, 30, this.palette.white);
+        this.label(this.root, 'STARPORT  /  ' + (this.page === 'Lobby' ? 'Hangar' : this.page === 'StageSelect' ? 'Deployment' : this.page === 'Results' ? 'Debrief' : 'Control Center'), 140, 183, 520, 25, 13, this.palette.muted);
         if (this.page === 'Lobby')
             this.lobby();
         else if (this.page === 'StageSelect')
@@ -140,8 +140,8 @@ export class StarportGame {
             this.settings();
         else
             this.results();
-        this.label(this.root, '离线训练   /   STARPORT', -246, -247, 410, 22, 12, this.palette.muted);
-        this.button(this.root, 'ExitGame', '返回验收主页  ↗', 305, -244, 250, 35, () => this.callbacks.exit(), this.palette.panel, this.palette.cyan);
+        this.label(this.root, 'OFFLINE TRAINING   /   STARPORT', -246, -247, 410, 22, 12, this.palette.muted);
+        this.button(this.root, 'ExitGame', 'Back to Sample  ↗', 305, -244, 250, 35, () => this.callbacks.exit(), this.palette.panel, this.palette.cyan);
     }
     private lobby() {
         this.box(this.root, 'Hangar', -160, -16, 573, 304, this.palette.panel, 14);
@@ -169,15 +169,15 @@ export class StarportGame {
         ship.setPosition(-177, -3);
         ship.setScale(3.2, 3.2);
         this.hangarShip = ship;
-        this.label(this.root, '先锋 · MK 04', -171, 110, 390, 34, 23, this.palette.white);
-        this.label(this.root, this.profile.weapon === 0 ? '重型脉冲炮  /  单发高伤害' : '速射离子炮  /  连续压制', -160, -139, 500, 26, 14, this.palette.muted);
+        this.label(this.root, 'Vanguard · MK 04', -171, 110, 390, 34, 23, this.palette.white);
+        this.label(this.root, this.profile.weapon === 0 ? 'Heavy Pulse Cannon  /  High damage per shot' : 'Rapid Ion Cannon  /  Sustained fire', -160, -139, 500, 26, 14, this.palette.muted);
         this.box(this.root, 'Mission', 294, -16, 281, 304, this.palette.panel, 14);
-        this.label(this.root, '当前行动', 295, 102, 240, 25, 13, this.palette.cyan);
+        this.label(this.root, 'CURRENT MISSION', 295, 102, 240, 25, 13, this.palette.cyan);
         this.label(this.root, stages[this.runtime.stage]!, 295, 63, 240, 38, 26, this.palette.white);
-        this.label(this.root, '清除三波入侵单位\n击败核心守卫，收集能量晶体', 295, 0, 240, 64, 15, this.palette.muted);
-        this.button(this.root, 'Deploy', '出击  →', 295, -87, 225, 55, () => this.go('StageSelect'), this.palette.cyan, this.palette.bg);
-        this.button(this.root, 'Weapon', '切换装备：' + (this.profile.weapon === 0 ? '脉冲炮' : '离子炮'), -284, -199, 320, 40, () => { this.profile.weapon = 1 - this.profile.weapon; this.save(); this.track('equip_weapon'); this.go('Lobby'); }, this.palette.line, this.palette.white);
-        this.button(this.root, 'Practice', '快速训练', 69, -199, 320, 40, () => this.go('Battle'), this.palette.panel, this.palette.cyan);
+        this.label(this.root, 'Clear three enemy waves.\nDefeat the Core Guardian\nand collect energy crystals.', 295, 0, 240, 64, 15, this.palette.muted);
+        this.button(this.root, 'Deploy', 'Deploy  →', 295, -87, 225, 55, () => this.go('StageSelect'), this.palette.cyan, this.palette.bg);
+        this.button(this.root, 'Weapon', 'Weapon: ' + (this.profile.weapon === 0 ? 'Pulse Cannon' : 'Ion Cannon'), -284, -199, 320, 40, () => { this.profile.weapon = 1 - this.profile.weapon; this.save(); this.track('equip_weapon'); this.go('Lobby'); }, this.palette.line, this.palette.white);
+        this.button(this.root, 'Practice', 'Quick Training', 69, -199, 320, 40, () => this.go('Battle'), this.palette.panel, this.palette.cyan);
     }
     private stages() {
         stages.forEach((name, i) => {
@@ -194,22 +194,22 @@ export class StarportGame {
             g.close();
             g.stroke();
             this.label(this.root, name, x, 22, 254, 36, 23, this.palette.white);
-            this.label(this.root, ['入门  /  三波敌人', '进阶  /  强化装甲', '挑战  /  核心守卫'][i]!, x, -14, 252, 27, 14, this.palette.muted);
-            this.label(this.root, ['建议：熟悉摇杆与闪避', '建议：利用掩体走位', '建议：保留修复技能'][i]!, x, -49, 252, 24, 13, this.palette.muted);
-            this.button(this.root, 'SelectStage' + i, selected ? '已选择' : '选择关卡', x, -109, 222, 41, () => { this.runtime.stage = i; this.track('select_stage'); this.go('StageSelect'); }, selected ? this.palette.cyan : this.palette.line, selected ? this.palette.bg : this.palette.white);
+            this.label(this.root, ['Beginner  /  Three waves', 'Advanced  /  Heavy armor', 'Challenge  /  Core Guardian'][i]!, x, -14, 252, 27, 14, this.palette.muted);
+            this.label(this.root, ['Tip: practice moving and dashing', 'Tip: use cover to reposition', 'Tip: save your repair skill'][i]!, x, -49, 252, 24, 13, this.palette.muted);
+            this.button(this.root, 'SelectStage' + i, selected ? 'Selected' : 'Select Stage', x, -109, 222, 41, () => { this.runtime.stage = i; this.track('select_stage'); this.go('StageSelect'); }, selected ? this.palette.cyan : this.palette.line, selected ? this.palette.bg : this.palette.white);
         });
-        this.button(this.root, 'BackLobby', '返回大厅', -274, -201, 310, 43, () => this.go('Lobby'), this.palette.panel, this.palette.white);
-        this.button(this.root, 'StartBattle', '开始行动  →', 198, -201, 395, 43, () => this.go('Battle'), this.palette.cyan, this.palette.bg);
+        this.button(this.root, 'BackLobby', 'Back to Hangar', -274, -201, 310, 43, () => this.go('Lobby'), this.palette.panel, this.palette.white);
+        this.button(this.root, 'StartBattle', 'Start Mission  →', 198, -201, 395, 43, () => this.go('Battle'), this.palette.cyan, this.palette.bg);
     }
     private settings() {
         this.box(this.root, 'ControlPanel', 0, -10, 870, 298, this.palette.panel, 14);
-        this.label(this.root, '操作指南', -238, 101, 345, 32, 24, this.palette.white);
-        this.label(this.root, '左侧摇杆：移动与走位\n右侧攻击：按住连射，自动瞄准最近敌人\n闪避：短距离突进并暂时免伤\n修复：恢复 35 点生命，有冷却时间', -194, 3, 440, 136, 18, this.palette.muted);
-        this.label(this.root, '键盘也可操作\nWASD / 方向键移动 · 空格攻击\nShift 闪避 · E 修复 · Esc 暂停', -198, -111, 440, 59, 12, this.palette.muted);
-        this.label(this.root, '战斗音效', 275, 72, 250, 33, 22, this.palette.white);
-        this.button(this.root, 'Sound', this.profile.sound ? '音效：开启' : '音效：关闭', 275, 15, 229, 45, () => { this.profile.sound = !this.profile.sound; this.save(); this.track('toggle_sound'); this.go('Settings'); }, this.profile.sound ? this.palette.cyan : this.palette.line, this.profile.sound ? this.palette.bg : this.palette.white);
-        this.label(this.root, '训练进度保存在本机\n不包含付费或真实交易', 273, -75, 255, 66, 15, this.palette.muted);
-        this.button(this.root, 'Back', '返回大厅', 0, -202, 340, 44, () => this.go('Lobby'), this.palette.cyan, this.palette.bg);
+        this.label(this.root, 'Controls', -238, 101, 345, 32, 24, this.palette.white);
+        this.label(this.root, 'Left stick: move and reposition.\nRight attack: hold to fire; auto-aims\nat the nearest enemy.\nDash: short burst with brief invincibility.\nRepair: restore 35 HP; has a cooldown.', -194, 3, 440, 136, 16, this.palette.muted);
+        this.label(this.root, 'Keyboard controls\nWASD / Arrows: move · Space: fire\nShift: dash · E: repair · Esc: pause', -198, -111, 440, 59, 12, this.palette.muted);
+        this.label(this.root, 'Battle Audio', 275, 72, 250, 33, 22, this.palette.white);
+        this.button(this.root, 'Sound', this.profile.sound ? 'Sound: On' : 'Sound: Off', 275, 15, 229, 45, () => { this.profile.sound = !this.profile.sound; this.save(); this.track('toggle_sound'); this.go('Settings'); }, this.profile.sound ? this.palette.cyan : this.palette.line, this.profile.sound ? this.palette.bg : this.palette.white);
+        this.label(this.root, 'Progress is saved locally.\nNo payments or\nreal transactions.', 273, -75, 255, 66, 15, this.palette.muted);
+        this.button(this.root, 'Back', 'Back to Hangar', 0, -202, 340, 44, () => this.go('Lobby'), this.palette.cyan, this.palette.bg);
     }
     private battle() {
         this.model = new Arena(this.runtime.stage, this.profile.weapon);
@@ -234,10 +234,10 @@ export class StarportGame {
         this.label(this.root, 'MK04', -400, 249, 80, 20, 14, this.palette.white);
         this.hp = this.graphics(this.root, 'Health');
         this.energy = this.graphics(this.root, 'Energy');
-        this.waveLabel = this.label(this.root, '准备行动', 10, 247, 320, 27, 18, this.palette.white);
-        this.scoreLabel = this.label(this.root, '晶体 0  /  击破 0', 17, 220, 340, 22, 12, this.palette.muted);
-        this.button(this.root, 'Pause', 'Ⅱ  暂停', 370, 239, 126, 38, () => this.pause(), this.palette.line, this.palette.white);
-        this.toastLabel = this.label(this.root, '移动躲避敌人，按住攻击清理三波入侵者', 0, -182, 850, 24, 14, this.palette.muted);
+        this.waveLabel = this.label(this.root, 'Ready for Deployment', 10, 247, 320, 27, 18, this.palette.white);
+        this.scoreLabel = this.label(this.root, 'Crystals 0  /  Kills 0', 17, 220, 340, 22, 12, this.palette.muted);
+        this.button(this.root, 'Pause', 'Ⅱ  Pause', 370, 239, 126, 38, () => this.pause(), this.palette.line, this.palette.white);
+        this.toastLabel = this.label(this.root, 'Move to dodge enemies. Hold attack to clear three waves.', 0, -182, 850, 24, 14, this.palette.muted);
         this.stick = this.box(this.root, 'MoveJoystick', -333, -230, 122, 92, this.palette.panel, 42);
         const ring = this.graphics(this.stick, 'Ring');
         ring.strokeColor = this.palette.line;
@@ -245,16 +245,16 @@ export class StarportGame {
         ring.circle(0, 0, 35);
         ring.stroke();
         this.knob = this.box(this.stick, 'Knob', 0, 0, 47, 47, this.palette.cyan, 23);
-        this.label(this.root, '移动', -430, -229, 63, 24, 13, this.palette.muted);
+        this.label(this.root, 'Move', -430, -229, 63, 24, 13, this.palette.muted);
         this.ui.joystick(this.stick, (p, started) => this.stickMove(p, started), () => this.stickEnd());
         const attack = this.box(this.root, 'Attack', 360, -228, 126, 84, this.palette.cyan, 36);
-        this.label(attack, '按住\n攻击', 0, 0, 110, 60, 19, this.palette.bg);
+        this.label(attack, 'Hold to\nAttack', 0, 0, 110, 60, 19, this.palette.bg);
         this.ui.hold(attack, () => this.fire(true), () => this.fire(false));
         const dash = this.button(this.root, 'Dash', '', 215, -231, 101, 64, () => this.skill('dash'), this.palette.blue, this.palette.white);
-        this.dashLabel = this.label(dash, '闪避', 0, 0, 95, 52, 17, this.palette.white);
+        this.dashLabel = this.label(dash, 'Dash', 0, 0, 95, 52, 17, this.palette.white);
         const heal = this.button(this.root, 'Repair', '', 92, -231, 101, 64, () => this.skill('heal'), this.palette.panel, this.palette.white);
-        this.healLabel = this.label(heal, '修复', 0, 0, 95, 52, 17, this.palette.white);
-        this.label(this.root, '掩体可阻挡弹道\n注意保持射击角度', -99, -233, 210, 45, 12, this.palette.muted);
+        this.healLabel = this.label(heal, 'Repair', 0, 0, 95, 52, 17, this.palette.white);
+        this.label(this.root, 'Cover blocks shots.\nKeep a clear line of fire.', -99, -233, 210, 45, 12, this.palette.muted);
         this.drawBattle();
     }
     private stickMove(p: Point, started: boolean) { if (!this.model || this.model.paused)
@@ -270,7 +270,7 @@ export class StarportGame {
     } }
     private skill(which: string) { if (!this.model)
         return; const used = which === 'dash' ? this.model.dash() : this.model.heal(); if (!used && this.toastLabel)
-        this.toastLabel.string = which === 'dash' ? '闪避正在冷却' : '生命已满或修复正在冷却'; }
+        this.toastLabel.string = which === 'dash' ? 'Dash is on cooldown' : 'Health is full or repair is on cooldown'; }
     private drawBattle() {
         const m = this.model;
         if (!m)
@@ -302,10 +302,10 @@ export class StarportGame {
         } });
         this.bar(this.hp, -350, 244, 178, 10, m.hp / 100, m.hp > 30 ? this.palette.cyan : this.palette.red);
         this.bar(this.energy, -350, 227, 178, 5, m.energy / 100, this.palette.gold);
-        this.waveLabel.string = m.wave ? '第 ' + m.wave + ' / 3 波   ·   ' + Math.floor(m.elapsed) + 's' : '空域扫描中…';
-        this.scoreLabel.string = stages[this.runtime.stage]! + '   /   晶体 ' + m.crystals + '   /   击破 ' + m.kills;
-        this.dashLabel.string = m.dashCooldown > 0 ? '闪避\n' + m.dashCooldown.toFixed(1) + 's' : '闪避';
-        this.healLabel.string = m.healCooldown > 0 ? '修复\n' + Math.ceil(m.healCooldown) + 's' : '修复';
+        this.waveLabel.string = m.wave ? 'Wave ' + m.wave + ' / 3   ·   ' + Math.floor(m.elapsed) + 's' : 'Scanning airspace…';
+        this.scoreLabel.string = stages[this.runtime.stage]! + '   /   Crystals ' + m.crystals + '   /   Kills ' + m.kills;
+        this.dashLabel.string = m.dashCooldown > 0 ? 'Dash\n' + m.dashCooldown.toFixed(1) + 's' : 'Dash';
+        this.healLabel.string = m.healCooldown > 0 ? 'Repair\n' + Math.ceil(m.healCooldown) + 's' : 'Repair';
     }
     private gameEvent(e: ArenaEvent) {
         if (e.name === 'shot') {
@@ -315,7 +315,7 @@ export class StarportGame {
         this.track(e.name, { value: e.value, wave: this.model!.wave });
         const text: {
             [key: string]: string;
-        } = { wave_start: '警报：第 ' + e.value + ' 波敌人进入空域', damage: '装甲受损！使用闪避拉开距离', repair: '装甲修复 +35', dash: '闪避！短暂无敌', boss_defeated: '核心守卫已摧毁', crystal_collected: '获得能量晶体 +1' };
+        } = { wave_start: 'Alert: wave ' + e.value + ' enemies incoming', damage: 'Armor damaged! Dash to gain distance.', repair: 'Armor repaired +35', dash: 'Dash! Brief invincibility', boss_defeated: 'Core Guardian destroyed', crystal_collected: 'Energy crystal collected +1' };
         if (text[e.name] && this.toastLabel)
             this.toastLabel.string = text[e.name]!;
         if (e.name === 'damage' || e.name === 'enemy_defeated')
@@ -336,11 +336,11 @@ export class StarportGame {
         this.overlay = this.box(this.root, 'PauseOverlay', 0, 0, 960, 540, this.ui.color(5, 12, 23, 230), 0);
         this.ui.block(this.overlay);
         this.box(this.overlay, 'PauseCard', 0, 5, 430, 313, this.palette.panel, 18);
-        this.label(this.overlay, '行动已暂停', 0, 116, 380, 44, 30, this.palette.white);
-        this.label(this.overlay, '整理装备，准备重返战场', 0, 73, 380, 28, 15, this.palette.muted);
-        this.button(this.overlay, 'Resume', '继续战斗', 0, 14, 320, 49, () => this.resume(), this.palette.cyan, this.palette.bg);
-        this.button(this.overlay, 'Restart', '重新挑战', 0, -48, 320, 43, () => { this.track('restart_battle'); this.go('Battle'); }, this.palette.line, this.palette.white);
-        this.button(this.overlay, 'Abandon', '撤离至大厅', 0, -105, 320, 43, () => { this.track('abandon_battle'); this.go('Lobby'); }, this.palette.panel, this.palette.muted);
+        this.label(this.overlay, 'Mission Paused', 0, 116, 380, 44, 30, this.palette.white);
+        this.label(this.overlay, 'Regroup and prepare to return to battle.', 0, 73, 380, 28, 15, this.palette.muted);
+        this.button(this.overlay, 'Resume', 'Resume Battle', 0, 14, 320, 49, () => this.resume(), this.palette.cyan, this.palette.bg);
+        this.button(this.overlay, 'Restart', 'Restart Mission', 0, -48, 320, 43, () => { this.track('restart_battle'); this.go('Battle'); }, this.palette.line, this.palette.white);
+        this.button(this.overlay, 'Abandon', 'Retreat to Hangar', 0, -105, 320, 43, () => { this.track('abandon_battle'); this.go('Lobby'); }, this.palette.panel, this.palette.muted);
     }
     private resume() { if (!this.model)
         return; if (this.overlay) {
@@ -352,13 +352,13 @@ export class StarportGame {
     private results() {
         const r = this.runtime.result || { won: false, kills: 0, crystals: 0, time: 0, reward: 0, stage: this.runtime.stage };
         this.box(this.root, 'Results', 0, -1, 860, 282, this.palette.panel, 16);
-        this.label(this.root, r.won ? '空域已清理' : '行动中断', 0, 99, 770, 46, 32, r.won ? this.palette.cyan : this.palette.gold);
-        this.label(this.root, r.won ? '核心守卫已摧毁，先锋归航。' : '重新调整走位，再挑战一次。', 0, 58, 780, 29, 16, this.palette.muted);
-        [['击破单位', r.kills], ['收集晶体', r.crystals], ['行动时间', r.time + 's'], ['获得补给', '+' + r.reward]].forEach((a, i) => { const x = -312 + i * 208; this.label(this.root, '' + a[1], x, -12, 195, 52, 35, i === 3 ? this.palette.gold : this.palette.white); this.label(this.root, '' + a[0], x, -57, 195, 25, 14, this.palette.muted); });
-        this.label(this.root, '补给已计入本机训练存档', 0, -110, 700, 24, 13, this.palette.muted);
-        this.button(this.root, 'ResultLobby', '返回大厅', -277, -189, 265, 49, () => this.go('Lobby'), this.palette.line, this.palette.white);
-        this.button(this.root, 'Retry', '再来一局', 0, -189, 265, 49, () => this.go('Battle'), this.palette.cyan, this.palette.bg);
-        this.button(this.root, 'NextStage', '下一关  →', 277, -189, 265, 49, () => { this.runtime.stage = (this.runtime.stage + 1) % 3; this.go('StageSelect'); }, this.palette.panel, this.palette.cyan);
+        this.label(this.root, r.won ? 'Airspace Cleared' : 'Mission Failed', 0, 99, 770, 46, 32, r.won ? this.palette.cyan : this.palette.gold);
+        this.label(this.root, r.won ? 'Core Guardian destroyed. Vanguard returning to base.' : 'Adjust your tactics and try again.', 0, 58, 780, 29, 16, this.palette.muted);
+        [['Enemies Defeated', r.kills], ['Crystals Collected', r.crystals], ['Mission Time', r.time + 's'], ['Supplies Earned', '+' + r.reward]].forEach((a, i) => { const x = -312 + i * 208; this.label(this.root, '' + a[1], x, -12, 195, 52, 35, i === 3 ? this.palette.gold : this.palette.white); this.label(this.root, '' + a[0], x, -57, 195, 25, 14, this.palette.muted); });
+        this.label(this.root, 'Supplies added to your local training save.', 0, -110, 700, 24, 13, this.palette.muted);
+        this.button(this.root, 'ResultLobby', 'Back to Hangar', -277, -189, 265, 49, () => this.go('Lobby'), this.palette.line, this.palette.white);
+        this.button(this.root, 'Retry', 'Play Again', 0, -189, 265, 49, () => this.go('Battle'), this.palette.cyan, this.palette.bg);
+        this.button(this.root, 'NextStage', 'Next Stage  →', 277, -189, 265, 49, () => { this.runtime.stage = (this.runtime.stage + 1) % 3; this.go('StageSelect'); }, this.palette.panel, this.palette.cyan);
     }
     private sound(name: string) { if (this.profile.sound)
         this.ui.sound(name); }

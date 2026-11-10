@@ -106,7 +106,7 @@ SDK; the sample's iOS host and complete app were validated with it enabled.
 
 ## 3. Shared acceptance
 
-Run the [unified acceptance flow](../README.md#统一验收creator-2x--3x) for both
+Run the [unified acceptance flow](../README.md#shared-acceptance-creator-2x--3x) for both
 Creator generations and both native platforms. It covers network, RUM, Logs,
 Replay, privacy, and the interactive **Starport Game**. Open it through
 **Open Cocos Page → Open Starport Game**. The game supports deployment, weapons,

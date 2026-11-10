@@ -13,6 +13,7 @@ const { ccclass } = _decorator;
 export class Replay3DScene extends Component {
   camera!: Camera;
   private hud!: Node;
+  private hudBanner?: Graphics;
   private cube!: Node;
   private orb!: Node;
   private meshes: Mesh[] = [];
@@ -100,7 +101,15 @@ export class Replay3DScene extends Component {
   }
 
   setPaused(paused: boolean): void { this.paused = paused; }
-  setHudVisible(visible: boolean): void { this.hud.active = visible; }
+  setHudVisible(visible: boolean): void {
+    this.hud.active = visible;
+    if (visible && this.hudBanner) {
+      // Native Graphics geometry must be uploaded again after reactivation.
+      this.hudBanner.clear();
+      this.hudBanner.rect(-380, -36, 760, 72);
+      this.hudBanner.fill();
+    }
+  }
   returnTo2D(): void { this.onBack?.(); }
 
   onDestroy(): void {
@@ -114,8 +123,9 @@ export class Replay3DScene extends Component {
     this.materials.forEach((material) => material.destroy());
   }
 
-  private handleTouch(event: { getUILocation(): { x: number } }): void {
-    const x = (event.getUILocation().x - view.getVisibleOrigin().x) / view.getVisibleSize().width;
+  private handleTouch(event: { getLocation(): { x: number } }): void {
+    // Physical screen thirds stay stable with SHOW_ALL's side margins.
+    const x = event.getLocation().x / view.getFrameSize().width;
     if (x < 1 / 3) this.returnTo2D();
     else if (x < 2 / 3) this.setHudVisible(!this.hud.active);
     else this.setPaused(!this.paused);
@@ -176,6 +186,7 @@ export class Replay3DScene extends Component {
     banner.setPosition(0, size.height / 2 - 48);
     banner.addComponent(UITransform).setContentSize(760, 72);
     const graphics = banner.addComponent(Graphics);
+    this.hudBanner = graphics;
     graphics.fillColor = new Color(35, 190, 90, 255);
     graphics.rect(-380, -36, 760, 72);
     graphics.fill();

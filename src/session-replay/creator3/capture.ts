@@ -1,3 +1,4 @@
+import { replayError } from '../core/internal-errors.js';
 import { Camera, Director, EditBox, Node, RenderTexture, UITransform, Vec3, director, isValid, native, screen, sys } from 'cc';
 import type { FTCanvasCapture } from '../core/replay.js';
 import type { FTCapturedFrame, FTPrivacyRegion, FTReplayPrivacyMode, FTStoredFrame } from '../core/types.js';
@@ -9,7 +10,7 @@ import { privacyProjectionWeight, projectPrivacyPoints, rendererPrivacyBounds, t
 import type { PrivacyGeometry } from '../core/replay-renderer-bounds.js';
 import { waitForRenderTextureReadback } from './replay-render-cycle.js';
 
-const CAPTURE_CANCELLED = Symbol('Replay capture cancelled');
+const CAPTURE_CANCELLED = replayError('Replay capture cancelled');
 
 interface CaptureResources {
   source: any;
@@ -229,7 +230,7 @@ export class FTCreator3CanvasCapture implements FTCanvasCapture {
         const clipW = privacyProjectionWeight(matrix, point);
         if (clipW !== undefined && clipW <= 0) return { x: 0, y: 0, clipW };
         const projected = camera.worldToScreen?.(new Vec3(point.x, point.y, point.z ?? 0));
-        if (!projected) throw new Error('Unable to project Replay privacy geometry');
+        if (!projected) throw replayError('Unable to project Replay privacy geometry');
         return { x: projected.x, y: projected.y, clipW };
       },
     };

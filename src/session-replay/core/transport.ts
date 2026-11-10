@@ -1,3 +1,4 @@
+import { replayError } from './internal-errors.js';
 import type { FTValue } from '@truewatchtech/cocos-sdk/plugin-api';
 export type { FTNativeTransport } from '@truewatchtech/cocos-sdk/plugin-api';
 interface FTTransportResponse<T = FTValue> { ok: boolean; value?: T; error?: string; }
@@ -13,7 +14,7 @@ export function parseTransportResponse<T>(raw: unknown): T | undefined {
     return response as T;
   }
   if (!response.ok) {
-    throw new Error(response.error || 'Native bridge call failed');
+    throw replayError(response.error || 'Native bridge call failed');
   }
   return response.value as T | undefined;
 }

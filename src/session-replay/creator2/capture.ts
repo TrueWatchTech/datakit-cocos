@@ -1,3 +1,4 @@
+import { replayError } from '../core/internal-errors.js';
 import type { FTCanvasCapture } from '../core/replay.js';
 import { frameFingerprint } from '../core/replay.js';
 import { flipRgbaRows } from '../core/replay-pixels.js';
@@ -139,8 +140,22 @@ export class FTCreator2CanvasCapture implements FTCanvasCapture {
       scene,
     );
     const regions: FTPrivacyRegion[] = [];
-    const matrix = camera._camera?.worldMatrixToScreen?.(cc.mat4(), cc.mat4(), width, height);
-    if (camera.ortho === false && !matrix) throw new Error('Missing Replay privacy perspective projection');
+    if (!nodes.size) return regions;
+    let matrix = camera._camera?.worldMatrixToScreen?.(cc.mat4(), cc.mat4(), width, height);
+    if (!matrix && camera.ortho === false && camera.node?.getWorldRT) {
+      // Creator 2.4.9 JSB exposes worldToScreen, but not worldMatrixToScreen.
+      // Perspective clip W is -view Z. Derive that row from the same rigid
+      // camera transform used by the renderer, preserving camera-plane checks.
+      const transform = cc.mat4();
+      camera.node.getWorldRT(transform);
+      const m = transform.m;
+      const x = m ? m[8] : transform.m08;
+      const y = m ? m[9] : transform.m09;
+      const z = m ? m[10] : transform.m10;
+      matrix = { m03: -x, m07: -y, m11: -z,
+        m15: x * (m ? m[12] : transform.m12) + y * (m ? m[13] : transform.m13) + z * (m ? m[14] : transform.m14) };
+    }
+    if (camera.ortho === false && !matrix) throw replayError('Missing Replay privacy perspective projection');
     const geometry: PrivacyGeometry = {
       creator: 2,
       toWorld: (node: any, point) => node.convertToWorldSpaceAR(cc.v3(point.x, point.y, point.z ?? 0)),
@@ -148,7 +163,7 @@ export class FTCreator2CanvasCapture implements FTCanvasCapture {
         const clipW = privacyProjectionWeight(matrix, point);
         if (clipW !== undefined && clipW <= 0) return { x: 0, y: 0, clipW };
         const projected = camera._camera?.worldToScreen(cc.v3(0, 0, 0), cc.v3(point.x, point.y, point.z ?? 0), width, height);
-        if (!projected) throw new Error('Unable to project Replay privacy geometry');
+        if (!projected) throw replayError('Unable to project Replay privacy geometry');
         return { x: projected.x, y: projected.y, clipW };
       },
       nativeParticleBounds: (proxy) => (globalThis as any).__ftCocosReplayFile?.particleBounds?.(proxy),

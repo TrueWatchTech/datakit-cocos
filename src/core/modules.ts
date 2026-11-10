@@ -119,6 +119,17 @@ export class FTRUM {
     private readonly ownership = new FTSDKOwnership(),
   ) {}
 
+  /** @internal Reads the native View ID without changing the active View. */
+  observedViewId(): string | undefined {
+    try {
+      const value = this.transport.invoke<unknown>('rum.getViewId');
+      return typeof value === 'string' && value.length > 0 ? value : undefined;
+    } catch {
+      // Older bridges must keep collecting errors even without this capability.
+      return undefined;
+    }
+  }
+
   /**
    * Enables RUM with the supplied native and Cocos settings.
    *

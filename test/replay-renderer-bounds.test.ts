@@ -14,6 +14,13 @@ function fixture(creator: 2 | 3 = 3) {
 }
 
 describe('renderer privacy geometry', () => {
+  it.each([2, 3] as const)('tags missing skinned bounds before Creator %s can emit a JSB rejection', creator => {
+    const { node, components, geometry } = fixture(creator);
+    components['cc.MeshRenderer'] = { mesh: {}, skeleton: {} };
+    expect(() => rendererPrivacyBounds(node, geometry))
+      .toThrow('[ft-cocos-sdk-internal] Missing Replay privacy skinned bounds');
+  });
+
   it.each([2, 3] as const)('bounds Creator %s mesh vertices even without a UI size', (creator) => {
     const { node, components, geometry } = fixture(creator);
     node.x = 130; node.y = 40; node.z = 25;

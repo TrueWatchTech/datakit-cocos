@@ -1,3 +1,4 @@
+import { SampleDashboard } from '../examples/acceptance-components/SampleDashboard';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
@@ -9,7 +10,7 @@ function loadSample(generation: 2 | 3) {
     Component: class {}, Color: class {}, color: () => ({}),
     sys: { isNative: false },
     _decorator: { ccclass: (name: unknown) => typeof name === 'function' ? name : (klass: unknown) => klass },
-    view: { setDesignResolutionSize: vi.fn() },
+    view: { setDesignResolutionSize: vi.fn(), on: vi.fn() },
     ResolutionPolicy: { SHOW_ALL: 1, FIXED_HEIGHT: 2 },
   };
   const source = readFileSync(`examples/hybrid-creator${generation}/assets/${generation === 2 ? 'Script/' : ''}HybridTelemetrySample.ts`, 'utf8');
@@ -19,7 +20,7 @@ function loadSample(generation: 2 | 3) {
   const exports: Record<string, any> = {};
   runInNewContext(compiled, {
     exports, cc: engine,
-    require: (name: string) => name === 'cc' ? engine
+    require: (name: string) => name.includes('SampleDashboard') ? { SampleDashboard } : name === 'cc' ? engine
       : name.includes('session-replay/') ? { withSessionReplay }
         : name.includes('cocos-sdk/') ? { truewatchSdk: {} } : {},
   });

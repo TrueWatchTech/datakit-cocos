@@ -1,6 +1,7 @@
 import type { FTAttributes, FTUserData } from '../core/types.js';
 import { samplingPercentage, samplingRate } from '../core/validation.js';
 import { FT_COCOS_SDK_BRIDGE_INFO_KEY } from '../core/version.js';
+import { isInternalErrorText } from '../core/internal-errors.js';
 import type { FTBrowserLogs, FTBrowserRum, FTCocosWebConfig, FTWebPageRuntime, FTWebWindow } from './types.js';
 
 const TRACE_TYPES = {
@@ -80,10 +81,11 @@ export class FTWebRuntime implements FTWebPageRuntime {
         // Fail closed until the engine has registered a fresh scene privacy check.
         try { return this.privacyCheck?.() === true; } catch { return false; }
       },
-      beforeSend: (event: { type?: string; context?: FTAttributes }) => {
+      beforeSend: (event: { type?: string; context?: FTAttributes; error?: { message?: string; stack?: string } }) => {
         const manual = !!event.context?.[FT_COCOS_SDK_BRIDGE_INFO_KEY];
         if (event.type === 'resource') return config.autoTrack?.network === true;
-        if (event.type === 'error') return manual || config.autoTrack?.errors === true;
+        if (event.type === 'error') return manual || (config.autoTrack?.errors === true
+          && !isInternalErrorText(event.error?.message) && !isInternalErrorText(event.error?.stack));
         if (event.type === 'long_task') return web.trackLongTasks === true;
         return true;
       },

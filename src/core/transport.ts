@@ -1,4 +1,5 @@
 import type { FTValue } from './types.js';
+import { sdkInternalError } from './internal-errors.js';
 
 export interface FTTransportResponse<T = FTValue> {
   ok: boolean;
@@ -51,7 +52,7 @@ export function parseTransportResponse<T>(raw: unknown): T | undefined {
     return response as T;
   }
   if (!response.ok) {
-    throw new Error(response.error || 'Native bridge call failed');
+    throw sdkInternalError(response.error || 'Native bridge call failed');
   }
   return response.value as T | undefined;
 }

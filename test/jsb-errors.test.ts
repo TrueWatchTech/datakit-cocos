@@ -3,14 +3,16 @@ import { FTDefaultAutoTracking } from '../src/core/auto-tracking';
 import { FTRUM, FTLogger, FTTrace } from '../src/core/modules';
 import { FTCocosSDK } from '../src/core/client';
 import { installJsbErrorSource, type FTJsbErrorGlobal } from '../src/native/jsb-errors';
+import { replayError } from '../src/session-replay/core/internal-errors';
 
 type Callback = (location: string, message: string, stack: string) => void;
 const cleanups: Array<() => void> = [];
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { cleanups.splice(0).reverse().forEach(stop => stop()); vi.useRealTimers(); });
 
-function fixture() {
+function fixture(initialViewId: string | null = 'native-root') {
   let callback: Callback;
+  let viewId = initialViewId, nextView = 0;
   const register = vi.fn((handler: Callback) => { if (typeof handler !== 'function') throw new TypeError('expected function'); callback = handler; });
   const original = vi.fn();
   const calls: Array<{ method: string; payload: any }> = [];
@@ -19,6 +21,9 @@ function fixture() {
     if (method === 'rum.beginErrorObservation' || method === 'rum.endErrorObservation') {
       throw new Error('Native view association is not supported');
     }
+    if (method === 'rum.getViewId') return (viewId || undefined) as T | undefined;
+    if (method === 'rum.startView') viewId = `native-${++nextView}`;
+    if (method === 'rum.stopView') viewId = null;
     calls.push({ method, payload });
     return undefined;
   } };
@@ -31,12 +36,109 @@ function fixture() {
     cleanups.push(() => tracking.stop());
     return tracking;
   };
-  return { target, transport, calls, original, register, events, create, rum: new FTRUM(transport), createSDK: () => new FTCocosSDK(transport, create(), 'creator3'), fire: (...args: Parameters<Callback>) => callback(...args), errors: () => calls.filter(c => c.method === 'rum.addError') };
+  return { target, transport, calls, original, register, events, create, setViewId: (id: string | null) => { viewId = id; }, rum: new FTRUM(transport), createSDK: () => new FTCocosSDK(transport, create(), 'creator3'), fire: (...args: Parameters<Callback>) => callback(...args), errors: () => calls.filter(c => c.method === 'rum.addError') };
 }
 
 describe('native JSB automatic errors', () => {
+  it('excludes tagged SDK exceptions and early Promise notifications while preserving original delivery and manual errors', () => {
+    const f = fixture(); f.create().start({ errors: true });
+    const error = replayError('Missing Replay privacy skinned bounds');
+    f.fire('sdk.js:1', error.message, error.stack!);
+    f.fire('', 'unhandledRejectedPromise', `${error}\nstacktrace:\n[0]capture@sdk.js:1`);
+    f.fire('', 'handlerAddedAfterPromiseRejected', 'stacktrace:\n[0]capture@sdk.js:1');
+    vi.runOnlyPendingTimers();
+    expect(f.errors()).toEqual([]);
+    expect(f.original).toHaveBeenCalledTimes(3);
+    // Identical untagged text from an application still belongs to the application.
+    f.fire('', 'unhandledRejectedPromise', 'Error: Missing Replay privacy skinned bounds\nframe');
+    vi.runOnlyPendingTimers();
+    expect(f.errors()).toHaveLength(1);
+    expect(f.errors()[0]!.payload.type).toBe('unhandled_promise_rejection');
+    f.rum.addError(error.message, error.stack!);
+    expect(f.errors()).toHaveLength(2);
+  });
+
+  it.each([
+    ['TypeError: null', 'update@game.js:4', 'cocos_error'],
+    ['unhandledRejectedPromise', 'Error: rejected\nframe', 'unhandled_promise_rejection'],
+  ])('deduplicates %s across bursts and frames without starving a different error', (message, stack, type) => {
+    const f = fixture(); f.create().start({ errors: true });
+    for (let frame = 0; frame < 10; frame++) {
+      for (let i = 0; i < 200; i++) f.fire('game.js:4', message!, stack!);
+      f.fire('game.js:9', 'ReferenceError: missing', 'click@game.js:9');
+      vi.runOnlyPendingTimers();
+    }
+    expect(f.errors()).toHaveLength(2);
+    expect(f.errors()[0]!.payload.type).toBe(type);
+    expect(f.errors()[1]!.payload.message).toBe('ReferenceError: missing');
+    expect(f.original).toHaveBeenCalledTimes(2010);
+  });
+
+  it('distinguishes normalized type, message, stack and fallback location within a view', () => {
+    const f = fixture(); f.create().start({ errors: true });
+    const errors: Parameters<Callback>[] = [
+      ['', 'failed', 'frame A'], ['', 'different', 'frame A'], ['', 'failed', 'frame B'],
+      ['', 'unhandledRejectedPromise', 'Error: rejected\nframe'], ['', 'rejected', 'Error: rejected\nframe'],
+      ['game.js:1', 'missing stack', ''], ['game.js:2', 'missing stack', ''],
+    ];
+    for (const error of errors.concat(errors)) f.fire(...error);
+    vi.runOnlyPendingTimers();
+    expect(f.errors()).toHaveLength(errors.length);
+  });
+
+  it('reports both error types again on new native view IDs even with identical view names', () => {
+    const f = fixture(); f.create().start({ errors: true });
+    for (let view = 0; view < 2; view++) {
+      f.rum.startView('Game');
+      for (let repeat = 0; repeat < 2; repeat++) {
+        f.fire('', 'failed', 'frame');
+        f.fire('', 'unhandledRejectedPromise', 'Error: rejected\nframe');
+      }
+      vi.runOnlyPendingTimers();
+    }
+    expect(f.errors().map(error => error.payload.type)).toEqual([
+      'cocos_error', 'unhandled_promise_rejection', 'cocos_error', 'unhandled_promise_rejection',
+    ]);
+    // Host-driven view changes must also be observed without a Cocos startView call.
+    f.setViewId('host-view');
+    f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
+    expect(f.errors()).toHaveLength(5);
+  });
+
+  it('uses the captured view for deduplication when the original handler changes views', () => {
+    const f = fixture(); f.create().start({ errors: true });
+    f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
+    f.target.jsb!.onError!(() => { f.setViewId('new-native-view'); });
+    f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
+    expect(f.errors()).toHaveLength(1);
+    f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
+    expect(f.errors()).toHaveLength(2);
+  });
+
+  it('never deduplicates manual errors even when their content matches automatic errors', () => {
+    const f = fixture(); f.create().start({ errors: true });
+    for (const type of ['cocos_error', 'unhandled_promise_rejection']) {
+      f.rum.addError('failed', 'frame', type);
+      f.rum.addError('failed', 'frame', type);
+    }
+    f.fire('', 'failed', 'frame'); f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
+    expect(f.errors()).toHaveLength(5);
+  });
+
+  it.each(['missing', 'throwing'])('keeps reporting without deduplication when view lookup is %s', mode => {
+    const f = fixture(null); f.create().start({ errors: true });
+    const invoke = f.transport.invoke.bind(f.transport);
+    if (mode === 'throwing') vi.spyOn(f.transport, 'invoke').mockImplementation((method, payload) => {
+      if (method === 'rum.getViewId') throw new Error('unsupported bridge method');
+      return invoke(method, payload);
+    });
+    f.fire('', 'failed', 'frame'); f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
+    expect(f.errors()).toHaveLength(2);
+    expect(f.original).toHaveBeenCalledTimes(2);
+  });
+
   it('uses the existing addError payload without requiring native View ID capabilities', () => {
-    const f = fixture(), tracking = f.create();
+    const f = fixture(null), tracking = f.create();
     expect(() => tracking.start({ errors: true })).not.toThrow();
     expect(f.calls).toEqual([]);
     f.fire('game.js:4', 'failed', 'original stack');
@@ -53,7 +155,7 @@ describe('native JSB automatic errors', () => {
   });
 
   it('bounds queued errors while preserving every original callback and allowing later occurrences', () => {
-    const f = fixture(); f.create().start({ errors: true });
+    const f = fixture(null); f.create().start({ errors: true });
     for (let i = 0; i < 140; i++) f.fire('game.js:4', 'failed', 'frame');
     expect(f.errors()).toHaveLength(0);
     vi.runOnlyPendingTimers();
@@ -64,13 +166,13 @@ describe('native JSB automatic errors', () => {
     expect(f.original).toHaveBeenCalledTimes(141);
   });
 
-  it('cancels pending errors when tracking stops and accepts fresh observations after restart', () => {
+  it('releases cancelled errors but retains delivered identities across listener restarts', () => {
     const f = fixture(), tracking = f.create(); tracking.start({ errors: true });
     f.fire('', 'delivered', 'frame'); vi.runOnlyPendingTimers();
     f.fire('', 'cancelled', 'frame'); tracking.stop(); vi.runOnlyPendingTimers();
     tracking.start({ errors: true });
     f.fire('', 'delivered', 'frame'); f.fire('', 'cancelled', 'frame'); vi.runOnlyPendingTimers();
-    expect(f.errors().map(error => error.payload.message)).toEqual(['delivered', 'delivered', 'cancelled']);
+    expect(f.errors().map(error => error.payload.message)).toEqual(['delivered', 'cancelled']);
   });
 
   it('isolates a bridge failure and continues reporting later errors through the legacy method', () => {
@@ -87,7 +189,7 @@ describe('native JSB automatic errors', () => {
     fail = false;
     f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
     f.fire('', 'failed', 'frame'); vi.runOnlyPendingTimers();
-    expect(f.errors()).toHaveLength(2);
+    expect(f.errors()).toHaveLength(1);
   });
 
   it('accepts later errors after the shared observation queue has drained', () => {
@@ -154,10 +256,10 @@ describe('native JSB automatic errors', () => {
     installJsbErrorSource(f.target); expect(f.target.jsb!.onError).toBe(wrapped);
     const a = f.create(), b = f.create();
     a.start({ errors: true }); a.start({ errors: true }); b.start({ errors: true });
-    f.fire('', 'both', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(2);
-    a.stop(); f.fire('', 'only b', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(3);
-    b.start({ errors: false }); f.fire('', 'disabled', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(3);
-    a.start({ errors: true }); f.fire('', 'restarted', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(4);
+    f.fire('', 'both', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(1);
+    a.stop(); f.fire('', 'only b', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(2);
+    b.start({ errors: false }); f.fire('', 'disabled', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(2);
+    a.start({ errors: true }); f.fire('', 'restarted', 'stack'); vi.runOnlyPendingTimers(); expect(f.errors()).toHaveLength(3);
     expect(f.original).toHaveBeenCalledTimes(4);
   });
 

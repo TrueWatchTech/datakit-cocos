@@ -6,6 +6,7 @@ import com.ft.sdk.FTLogger;
 import com.ft.sdk.FTLoggerConfig;
 import com.ft.sdk.FTRUMConfig;
 import com.ft.sdk.FTRUMGlobalManager;
+import com.ft.sdk.FTRUMInnerManager;
 import com.ft.sdk.FTSDKConfig;
 import com.ft.sdk.FTSdk;
 import com.ft.sdk.FTTraceConfig;
@@ -79,6 +80,8 @@ public final class FTCocosBridge {
             case "rum.startView":
                 FTRUMGlobalManager.get().startView(payload.getString("name"), map(payload.optJSONObject("attributes")));
                 return null;
+            case "rum.getViewId":
+                return FTRUMInnerManager.get().getViewId();
             case "rum.stopView":
                 FTRUMGlobalManager.get().stopView(map(payload.optJSONObject("attributes")));
                 return null;

@@ -1,3 +1,4 @@
+import { replayError } from './internal-errors.js';
 export interface PrivacyBounds {
   x: number;
   y: number;
@@ -51,15 +52,15 @@ export function clippedPrivacyBounds(
   const read = (node: PrivacyNode): PrivacyBounds | undefined => {
     const bounds = adapter.ownBounds(node);
     if (bounds && (!Object.values(bounds).every(Number.isFinite) || bounds.width < 0 || bounds.height < 0)) {
-      throw new Error('Invalid Replay privacy bounds');
+      throw replayError('Invalid Replay privacy bounds');
     }
     return bounds;
   };
   const clipFor = (node: PrivacyNode, clip?: PrivacyBounds | null): PrivacyBounds | null | undefined => {
     if (clip === null || !adapter.clipsChildren(node)) return clip;
     const bounds = adapter.clipBounds ? adapter.clipBounds(node) : read(node);
-    if (bounds && !Object.values(bounds).every(Number.isFinite)) throw new Error('Invalid Replay privacy clip bounds');
-    if (!bounds) throw new Error('Missing Replay privacy clip bounds');
+    if (bounds && !Object.values(bounds).every(Number.isFinite)) throw replayError('Invalid Replay privacy clip bounds');
+    if (!bounds) throw replayError('Missing Replay privacy clip bounds');
     return clip ? intersect(clip, bounds) : bounds;
   };
   let ancestorClip: PrivacyBounds | null | undefined;
@@ -70,7 +71,7 @@ export function clippedPrivacyBounds(
   const include = (bounds?: PrivacyBounds | null): void => {
     if (!bounds) return;
     if (!Object.values(bounds).every(Number.isFinite) || bounds.width < 0 || bounds.height < 0) {
-      throw new Error('Invalid Replay privacy renderer bounds');
+      throw replayError('Invalid Replay privacy renderer bounds');
     }
     if (bounds.width <= 0 || bounds.height <= 0) return;
     if (!result) result = { ...bounds };
